@@ -20,6 +20,7 @@ import {
 } from './client';
 import { createPtvAbortController } from '../core/abortController';
 import Events from '../../utils/events';
+import { getPtvUserViews } from './libraries';
 
 function createAbortableFetchMock() {
     return vi.fn((_url: string, init?: RequestInit) => new Promise<Response>((_resolve, reject) => {
@@ -115,6 +116,70 @@ describe('PTV API error credential safety', () => {
 });
 
 describe('PTV abortable JSON transport', () => {
+    it('keeps ordinary in-flight coalescing while fresh requests use distinct no-store transports', async () => {
+        const first = createDeferred<{ source: string }>();
+        const second = createDeferred<{ source: string }>();
+        const third = createDeferred<{ source: string }>();
+        const responses = [first, second, third];
+        const fetchMock = vi.fn().mockImplementation(() => Promise.resolve({
+            json: () => responses.shift()?.promise,
+            ok: true
+        }));
+
+        (window as unknown as { ApiClient: Record<string, unknown> }).ApiClient = {
+            getCurrentUserId: () => 'user-a',
+            getUrl: (path: string) => `https://jellyfin.test/${path}`,
+            serverId: () => 'server-a',
+            setRequestHeaders: vi.fn((headers: Record<string, string>) => {
+                headers.Authorization = 'MediaBrowser test-token';
+            })
+        };
+        vi.stubGlobal('fetch', fetchMock);
+
+        const ordinary = requestPtvJson<{ source: string }>('Users/user-a/Views');
+        const sharedOrdinary = requestPtvJson<{ source: string }>('Users/user-a/Views');
+        const freshOne = requestPtvJson<{ source: string }>('Users/user-a/Views', { fresh: true });
+        const freshTwo = requestPtvJson<{ source: string }>('Users/user-a/Views', { fresh: true });
+
+        expect(fetchMock).toHaveBeenCalledTimes(3);
+        expect(fetchMock.mock.calls.map(call => call[1]?.cache)).toEqual([
+            undefined,
+            'no-store',
+            'no-store'
+        ]);
+        expect(fetchMock.mock.calls[1]?.[1]?.headers).toMatchObject({
+            Authorization: 'MediaBrowser test-token'
+        });
+
+        first.resolve({ source: 'ordinary' });
+        second.resolve({ source: 'fresh-one' });
+        third.resolve({ source: 'fresh-two' });
+
+        await expect(ordinary).resolves.toEqual({ source: 'ordinary' });
+        await expect(sharedOrdinary).resolves.toEqual({ source: 'ordinary' });
+        await expect(freshOne).resolves.toEqual({ source: 'fresh-one' });
+        await expect(freshTwo).resolves.toEqual({ source: 'fresh-two' });
+    });
+
+    it('forwards the explicit fresh option through user Views', async () => {
+        const fetchMock = vi.fn().mockResolvedValue({
+            json: () => Promise.resolve({ Items: [], TotalRecordCount: 0 }),
+            ok: true
+        });
+
+        (window as unknown as { ApiClient: Record<string, unknown> }).ApiClient = {
+            getCurrentUserId: () => 'user-a',
+            getUrl: (path: string) => `https://jellyfin.test/${path}`,
+            setRequestHeaders: vi.fn()
+        };
+        vi.stubGlobal('fetch', fetchMock);
+
+        await getPtvUserViews({ fresh: true, userId: 'user-a' });
+
+        expect(fetchMock).toHaveBeenCalledWith('https://jellyfin.test/Users/user-a/Views',
+            expect.objectContaining({ cache: 'no-store' }));
+    });
+
     it('uses the coordinator-owned bounded fetch even without an external consumer signal', async () => {
         const getJSON = vi.fn().mockResolvedValue({ transport: 'legacy' });
         const fetchMock = vi.fn().mockResolvedValue({

@@ -23,6 +23,7 @@ export function getPtvMediaFolders(options: {
 }
 
 export function getPtvUserViews(options: {
+    fresh?: boolean;
     scope?: 'background' | 'route';
     serverId?: string | null;
     signal?: AbortSignal;
@@ -44,6 +45,7 @@ export function getPtvUserViews(options: {
     }
 
     return requestPtvJson<PtvItemsResult<PtvLibrary>>(`Users/${userId}/Views`, {
+        fresh: options.fresh,
         scope: options.scope,
         serverId: options.serverId,
         signal: options.signal

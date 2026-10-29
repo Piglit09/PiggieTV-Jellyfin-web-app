@@ -6,9 +6,14 @@ const recommendationEventMocks = vi.hoisted(() => ({
 const recommendationPluginMocks = vi.hoisted(() => ({
     getCurrentPtvPluginApiClient: vi.fn()
 }));
+const recommendationScopeMocks = vi.hoisted(() => ({
+    getPtvCurrentUserId: vi.fn(),
+    getPtvServerId: vi.fn()
+}));
 
 vi.mock('../../core/observability', () => recommendationEventMocks);
 vi.mock('../../core/pluginApi', () => recommendationPluginMocks);
+vi.mock('../../api', () => recommendationScopeMocks);
 
 import {
     buildPtvDistinctMusicRecommendationRow,
@@ -20,7 +25,8 @@ import {
 
 const musicApiMocks = vi.hoisted(() => ({
     fetchPtvMusicTracksForGenerator: vi.fn(),
-    getPtvMusicHome: vi.fn()
+    getPtvMusicHome: vi.fn(),
+    samplePtvMusicMixCandidates: vi.fn()
 }));
 
 vi.mock('./musicApi', () => musicApiMocks);
@@ -202,17 +208,259 @@ describe('buildPtvMusicRecommendations()', () => {
         recommendationEventMocks.recordPtvEvent.mockClear();
         recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReset();
         recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReturnValue(null);
+        recommendationScopeMocks.getPtvServerId.mockReset();
+        recommendationScopeMocks.getPtvServerId.mockReturnValue('server-1');
+        recommendationScopeMocks.getPtvCurrentUserId.mockReset();
+        recommendationScopeMocks.getPtvCurrentUserId.mockReturnValue('user-1');
         musicApiMocks.fetchPtvMusicTracksForGenerator.mockReset();
         musicApiMocks.getPtvMusicHome.mockReset();
+        musicApiMocks.samplePtvMusicMixCandidates.mockReset();
     });
+
+    function useScopedMusicSample(items: TestMusicItem[]) {
+        musicApiMocks.samplePtvMusicMixCandidates.mockResolvedValue({
+            assertCurrent: vi.fn(),
+            verifyCurrent: vi.fn().mockResolvedValue(undefined),
+            complete: true,
+            items,
+            libraryId: 'music-library-1',
+            received: items.length,
+            requests: 1,
+            seedVerified: true,
+            serverId: 'server-1',
+            totalCount: items.length,
+            userId: 'user-1'
+        });
+    }
 
     function useMusicHome(items: TestMusicItem[]) {
         musicApiMocks.getPtvMusicHome.mockResolvedValue({
+            library: { id: 'music-library-1', name: 'Music' },
             sections: [{
                 items
             }]
         });
+        useScopedMusicSample(items);
     }
+
+    it('samples relevant unplayed tracks beyond 300 familiar Home candidates in a large library', async () => {
+        const libraryTracks = Array.from({ length: 2_100 }, (_, index) => ({
+            ...musicItem(`large-library-${index}`, `Artist ${index}`, `Track ${index}`, [ 'Synth' ]),
+            UserData: {
+                IsFavorite: index < 300,
+                PlayCount: index < 300 ? 4 : 0
+            }
+        }));
+        const laterTrackIds = new Set(libraryTracks.slice(300).map(item => item.Id));
+
+        musicApiMocks.getPtvMusicHome.mockResolvedValue({
+            completeness: 'complete',
+            generatedAt: Date.now(),
+            isPartial: false,
+            library: { id: 'music-library-1', name: 'Music' },
+            sections: [{
+                id: 'tracks',
+                items: libraryTracks.slice(0, 300),
+                kind: 'track',
+                title: 'Songs'
+            }],
+            stats: { albumCount: 2_100, artistCount: 2_100, trackCount: 2_100 }
+        });
+        musicApiMocks.samplePtvMusicMixCandidates.mockImplementation(async () => {
+            const items = libraryTracks.slice(300, 492);
+
+            return {
+                assertCurrent: vi.fn(),
+                verifyCurrent: vi.fn().mockResolvedValue(undefined),
+                complete: true,
+                items,
+                libraryId: 'music-library-1',
+                received: items.length,
+                requests: 5,
+                seedVerified: true,
+                serverId: 'server-1',
+                totalCount: libraryTracks.length,
+                userId: 'user-1'
+            };
+        });
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 50,
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'large-library-fixed-session'
+        });
+        const itemIds = result.items.map(item => item.Id);
+
+        expect(result.items).toHaveLength(50);
+        expect(result.items.filter(item => laterTrackIds.has(item.Id)).length).toBeGreaterThan(25);
+        expect(new Set(itemIds).size).toBe(itemIds.length);
+        expect(result.items.every(item => item.Genres?.includes('Synth'))).toBe(true);
+        expect(musicApiMocks.samplePtvMusicMixCandidates).toHaveBeenCalledWith(expect.objectContaining({
+            sessionSeed: expect.stringContaining('large-library-fixed-session')
+        }));
+        expect(musicApiMocks.getPtvMusicHome).not.toHaveBeenCalled();
+    });
+
+    it('retains a rare relevant fresh sample track without depending on cached Home shelves', async () => {
+        const rare = musicItem('rare-darkwave', 'Rare Artist', 'Rare Darkwave', ['Darkwave']);
+        const distractors = Array.from({ length: 100 }, (_, index) => (
+            musicItem(`country-${index}`, `Country Artist ${index}`, `Country Track ${index}`, ['Country'])
+        ));
+
+        musicApiMocks.getPtvMusicHome.mockResolvedValue({
+            library: { id: 'music-library-1', name: 'Music' },
+            sections: [{ items: distractors }]
+        });
+        useScopedMusicSample([...distractors, rare]);
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 10,
+            prompt: 'Darkwave mix',
+            seed: { kind: 'genre', label: 'Darkwave', value: 'Darkwave' },
+            sessionSeed: 'rare-relevant-sample'
+        });
+
+        expect(result.items.map(item => item.Id)).toEqual(['rare-darkwave']);
+        expect(musicApiMocks.getPtvMusicHome).not.toHaveBeenCalled();
+    });
+
+    it('does not admit a Home item absent from the selected-library sample', async () => {
+        const scoped = Array.from({ length: 5 }, (_, index) => (
+            musicItem(`scoped-${index}`, `Scoped Artist ${index}`, `Scoped Track ${index}`)
+        ));
+        const foreign = Array.from({ length: 5 }, (_, index) => ({
+            ...musicItem(`foreign-${index}`, `Foreign Artist ${index}`, `Foreign Track ${index}`),
+            UserData: { IsFavorite: true, PlayCount: 30 }
+        }));
+
+        useMusicHome([...foreign, ...scoped]);
+        useScopedMusicSample(scoped);
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 3,
+            seed: { kind: 'random' },
+            sessionSeed: 'selected-library-only'
+        });
+
+        expect(result.items).toHaveLength(3);
+        expect(result.items.every(item => item.Id?.startsWith('scoped-'))).toBe(true);
+    });
+
+    it('does not use cached Home tracks when the fresh selected-library sample is empty', async () => {
+        useMusicHome([
+            musicItem('home-only', 'Cached Artist', 'Cached Track', [ 'Synth' ])
+        ]);
+        useScopedMusicSample([]);
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 4,
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'empty-scoped-sample'
+        });
+
+        expect(result.items).toEqual([]);
+    });
+
+    it('propagates a scoped sampling failure without substituting cached Home tracks', async () => {
+        useMusicHome([
+            musicItem('home-only', 'Cached Artist', 'Cached Track', [ 'Synth' ])
+        ]);
+        musicApiMocks.samplePtvMusicMixCandidates.mockRejectedValue(new Error('scoped sample failed'));
+
+        await expect(buildPtvMusicRecommendations({
+            limit: 4,
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'failed-scoped-sample'
+        })).rejects.toThrow('scoped sample failed');
+    });
+
+    it('keeps verified partial sample tracks without admitting cached Home-only tracks', async () => {
+        const scoped = Array.from({ length: 5 }, (_, index) => (
+            musicItem(`partial-${index}`, `Scoped Artist ${index}`, `Scoped Track ${index}`)
+        ));
+
+        useMusicHome([
+            musicItem('home-only', 'Cached Artist', 'Cached Track'),
+            ...scoped
+        ]);
+        musicApiMocks.samplePtvMusicMixCandidates.mockResolvedValue({
+            assertCurrent: vi.fn(),
+            verifyCurrent: vi.fn().mockResolvedValue(undefined),
+            complete: false,
+            items: scoped,
+            libraryId: 'music-library-1',
+            received: scoped.length,
+            requests: 3,
+            seedVerified: null,
+            serverId: 'server-1',
+            totalCount: 2_100,
+            userId: 'user-1'
+        });
+
+        const result = await buildPtvMusicRecommendations({
+            limit: 3,
+            seed: { kind: 'random' },
+            sessionSeed: 'partial-scope'
+        });
+
+        expect(result.items).toHaveLength(3);
+        expect(result.items.every(item => item.Id?.startsWith('partial-'))).toBe(true);
+    });
+
+    it('rejects an explicit song seed outside the selected Music library', async () => {
+        const foreignSeed = musicItem('foreign-seed', 'Foreign Artist', 'Foreign Track', [ 'Synth' ]);
+
+        useMusicHome([foreignSeed]);
+        musicApiMocks.samplePtvMusicMixCandidates.mockResolvedValue({
+            assertCurrent: vi.fn(),
+            verifyCurrent: vi.fn().mockResolvedValue(undefined),
+            complete: true,
+            items: [musicItem('scoped-track', 'Scoped Artist', 'Scoped Track', [ 'Synth' ])],
+            libraryId: 'music-library-1',
+            received: 1,
+            requests: 3,
+            seedVerified: false,
+            serverId: 'server-1',
+            totalCount: 1,
+            userId: 'user-1'
+        });
+
+        await expect(buildPtvMusicRecommendations({
+            limit: 4,
+            seed: { item: foreignSeed, kind: 'song', label: foreignSeed.Name },
+            sessionSeed: 'foreign-seed-attempt'
+        })).rejects.toThrow(/seed|library/i);
+    });
+
+    it('varies queue membership between explicit sessions while repeating the same session exactly', async () => {
+        const items = Array.from({ length: 80 }, (_, index) => (
+            musicItem(`variety-${index}`, `Artist ${index}`, `Track ${index}`, ['Synth'])
+        ));
+
+        useMusicHome(items.slice(0, 12));
+        useScopedMusicSample(items);
+
+        const generate = (sessionSeed: string) => buildPtvMusicRecommendations({
+            limit: 20,
+            seed: { kind: 'genre' as const, label: 'Synth', value: 'Synth' },
+            sessionSeed
+        });
+        const first = (await generate('session-one')).items.map(item => item.Id);
+        const repeated = (await generate('session-one')).items.map(item => item.Id);
+        const second = (await generate('session-two')).items.map(item => item.Id);
+
+        expect(first).toHaveLength(20);
+        expect(repeated).toEqual(first);
+        expect(second).toHaveLength(20);
+        expect(second).not.toEqual(first);
+        expect(second.some(id => !first.includes(id))).toBe(true);
+        expect(musicApiMocks.samplePtvMusicMixCandidates).toHaveBeenCalledWith(expect.objectContaining({
+            sessionSeed: expect.stringContaining('session-one')
+        }));
+        expect(musicApiMocks.samplePtvMusicMixCandidates).toHaveBeenCalledWith(expect.objectContaining({
+            sessionSeed: expect.stringContaining('session-two')
+        }));
+    });
 
     it('keeps a playable song seed first while enforcing feedback and concentration limits', async () => {
         const seed = musicItem('seed-song', 'Seed Artist', 'Seed Song', ['Synth']);
@@ -296,7 +544,7 @@ describe('buildPtvMusicRecommendations()', () => {
         expect(itemIds).not.toContain('hidden');
         expect(Math.max(...Object.values(artistCounts))).toBeLessThanOrEqual(3);
         expect(Math.max(...Object.values(albumCounts))).toBeLessThanOrEqual(2);
-        expect(musicApiMocks.fetchPtvMusicTracksForGenerator).not.toHaveBeenCalled();
+        expect(musicApiMocks.samplePtvMusicMixCandidates).toHaveBeenCalledTimes(2);
     });
 
     it.each([
@@ -464,7 +712,7 @@ describe('buildPtvMusicRecommendations()', () => {
     it('uses the plugin V2 rank when advertised and preserves a local fallback boundary', async () => {
         const items = [
             musicItem('plugin-a', 'Artist A', 'Track A', [ 'Ambient' ]),
-            musicItem('plugin-b', 'Artist B', 'Track B', [ 'Ambient' ])
+            musicItem('plugin-b-later-page', 'Artist B', 'Track B', [ 'Ambient' ])
         ];
         const getStatus = vi.fn().mockResolvedValue({
             featureFlags: { recommendationPolicyV2: true }
@@ -487,7 +735,7 @@ describe('buildPtvMusicRecommendations()', () => {
             generatedAt: '2026-08-08T00:00:00Z',
             generationLatencyMs: 1,
             items: [
-                { classification: 'discovery', id: 'plugin-b', mediaType: 'Audio', rank: 1, reasons: [], score: 2, source: 'jellyfin-music-library', title: 'Track B', transitionScore: 0 },
+                { classification: 'discovery', id: 'plugin-b-later-page', mediaType: 'Audio', rank: 1, reasons: [], score: 2, source: 'jellyfin-music-library', title: 'Track B', transitionScore: 0 },
                 { classification: 'discovery', id: 'plugin-a', mediaType: 'Audio', rank: 2, reasons: [], score: 1, source: 'jellyfin-music-library', title: 'Track A', transitionScore: 0 }
             ],
             policyVersion: 'music-premium-v2',
@@ -500,7 +748,11 @@ describe('buildPtvMusicRecommendations()', () => {
             getStatus,
             rankRecommendations
         });
-        useMusicHome(items);
+        useMusicHome([
+            items[0],
+            musicItem('home-foreign', 'Foreign Artist', 'Foreign Home Track', [ 'Ambient' ])
+        ]);
+        useScopedMusicSample(items);
 
         const result = await buildPtvMusicRecommendations({
             limit: 2,
@@ -509,10 +761,13 @@ describe('buildPtvMusicRecommendations()', () => {
             sessionSeed: 'plugin-v2'
         });
 
-        expect(result.items.map(item => item.Id)).toEqual([ 'plugin-b', 'plugin-a' ]);
+        expect(result.items.map(item => item.Id)).toEqual([ 'plugin-b-later-page', 'plugin-a' ]);
         expect(getStatus).toHaveBeenCalledWith({ signal: undefined });
         expect(rankRecommendations).toHaveBeenCalledWith(
             expect.objectContaining({
+                candidates: expect.arrayContaining([
+                    expect.objectContaining({ id: 'plugin-b-later-page' })
+                ]),
                 contractVersion: '2.0',
                 policyVersion: 'music-premium-v2',
                 seed: expect.objectContaining({ genres: expect.arrayContaining([ 'ambient' ]) }),
@@ -520,6 +775,108 @@ describe('buildPtvMusicRecommendations()', () => {
             }),
             { signal: undefined }
         );
+        const pluginCandidates = rankRecommendations.mock.calls[0][0].candidates as { id: string }[];
+
+        expect(pluginCandidates.map(item => item.id)).not.toContain('home-foreign');
+        expect(recommendationEventMocks.recordPtvEvent).toHaveBeenCalledWith(
+            'recommendation',
+            'music-recommendation-generation-completed',
+            expect.objectContaining({ source: 'plugin-v2' })
+        );
+    });
+
+    it('bounds the plugin pool to 300 unique eligible tracks even when the scoped source is larger', async () => {
+        const scoped = Array.from({ length: 350 }, (_, index) => (
+            musicItem(`cap-${index}`, `Artist ${index}`, `Track ${index}`, [ 'Synth' ])
+        ));
+        const rankRecommendations = vi.fn().mockImplementation((request: {
+            candidates: { id: string }[];
+            requestId: string;
+            surface: string;
+        }) => Promise.resolve({
+            algorithmId: 'ptv-diversified-sequence-v2',
+            cohort: 'music-premium',
+            constraints: {
+                discoveryTarget: 0.75,
+                familiarTarget: 0.25,
+                maxConsecutiveAlbum: 2,
+                maxConsecutiveArtist: 2,
+                maxItemsPerAlbum: 2,
+                maxItemsPerArtist: 3
+            },
+            contractVersion: '2.0',
+            generatedAt: '2026-08-08T00:00:00Z',
+            generationLatencyMs: 1,
+            items: [{
+                classification: 'discovery',
+                id: request.candidates[0].id,
+                mediaType: 'Audio',
+                rank: 1,
+                reasons: [],
+                score: 1,
+                source: 'jellyfin-music-library',
+                title: 'Selected Track',
+                transitionScore: 0
+            }],
+            policyVersion: 'music-premium-v2',
+            requestId: request.requestId,
+            surface: request.surface
+        }));
+
+        recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReturnValue({
+            getCurrentUserId: () => 'user-1',
+            getStatus: vi.fn().mockResolvedValue({ featureFlags: { recommendationPolicyV2: true } }),
+            rankRecommendations
+        });
+        useMusicHome([]);
+        useScopedMusicSample([...scoped, scoped[0]]);
+
+        await buildPtvMusicRecommendations({
+            limit: 12,
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'candidate-bound'
+        });
+
+        const candidates = rankRecommendations.mock.calls[0][0].candidates as { id: string }[];
+        const ids = candidates.map(item => item.id);
+
+        expect(candidates.length).toBeGreaterThan(12);
+        expect(candidates.length).toBeLessThanOrEqual(300);
+        expect(new Set(ids).size).toBe(ids.length);
+    });
+
+    it('applies prompt, codec, and feedback exclusions to scoped tracks before queue handoff', async () => {
+        const eligible = [
+            { ...musicItem('eligible-a', 'Artist A', 'Track A', [ 'Synth' ]), Container: 'flac' },
+            { ...musicItem('eligible-b', 'Artist B', 'Track B', [ 'Synth' ]), Container: 'flac' }
+        ];
+        const hidden = { ...musicItem('hidden-synth', 'Hidden', 'Hidden Track', [ 'Synth' ]), Container: 'flac' };
+        const disliked = {
+            ...musicItem('disliked-synth', 'Disliked', 'Disliked Track', [ 'Synth' ]),
+            Container: 'flac',
+            UserData: { IsFavorite: false, Likes: false, PlayCount: 0 }
+        };
+        const unrelated = { ...musicItem('country-favorite', 'Country', 'Unrelated', [ 'Country' ]), Container: 'flac' };
+        const wrongCodec = { ...musicItem('mp3-synth', 'MP3', 'MP3 Track', [ 'Synth' ]), Container: 'mp3' };
+
+        useMusicHome([]);
+        useScopedMusicSample([...eligible, hidden, disliked, unrelated, wrongCodec]);
+
+        const result = await buildPtvMusicRecommendations({
+            feedback: {
+                entries: [{ action: 'hide-from-home', createdAt: 1, itemId: 'hidden-synth', terms: [] }],
+                undoStack: []
+            },
+            limit: 8,
+            prompt: 'FLAC-only Synth playlist',
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'scoped-filters'
+        });
+
+        expect(result.items.map(item => item.Id)).toEqual(expect.arrayContaining(['eligible-a', 'eligible-b']));
+        expect(result.items.every(item => item.Genres?.includes('Synth') && item.Container === 'flac')).toBe(true);
+        expect(result.items.map(item => item.Id)).not.toContain('hidden-synth');
+        expect(result.items.map(item => item.Id)).not.toContain('disliked-synth');
     });
 
     it('falls back to the local V2 rank when the plugin returns malformed ranked items', async () => {
@@ -798,18 +1155,16 @@ describe('buildPtvMusicRecommendations()', () => {
         expect(new Set(result.items.map(item => item.Id)).size).toBe(1);
     });
 
-    it('forwards cancellation to fallback work and rejects a retired generation', async () => {
+    it('forwards cancellation to scoped sampling and rejects a retired generation', async () => {
         // eslint-disable-next-line compat/compat -- Jellyfin loads the AbortController polyfill for legacy web runtimes.
         const controller = new AbortController();
 
         useMusicHome([]);
-        musicApiMocks.fetchPtvMusicTracksForGenerator.mockImplementation((
-            _query: unknown,
-            _limit: number,
-            signal?: AbortSignal
+        musicApiMocks.samplePtvMusicMixCandidates.mockImplementation((
+            options: { signal?: AbortSignal }
         ) => new Promise((_resolve, reject) => {
             // eslint-disable-next-line sonarjs/no-nested-functions -- The pending generator request must observe the test-owned signal.
-            signal?.addEventListener('abort', () => {
+            options.signal?.addEventListener('abort', () => {
                 reject(new DOMException('Stopped', 'AbortError'));
             }, { once: true });
         }));
@@ -824,11 +1179,9 @@ describe('buildPtvMusicRecommendations()', () => {
         });
 
         await vi.waitFor(() => {
-            expect(musicApiMocks.fetchPtvMusicTracksForGenerator).toHaveBeenCalledWith(
-                expect.any(Object),
-                expect.any(Number),
-                controller.signal
-            );
+            expect(musicApiMocks.samplePtvMusicMixCandidates).toHaveBeenCalledWith(expect.objectContaining({
+                signal: controller.signal
+            }));
         });
         controller.abort();
 
@@ -837,18 +1190,160 @@ describe('buildPtvMusicRecommendations()', () => {
         });
     });
 
-    it('rejects superseded work after Home resolves without starting fallback work', async () => {
-        const isCurrent = vi.fn()
-            .mockReturnValueOnce(true)
-            .mockReturnValueOnce(true)
-            .mockReturnValue(false);
+    it('does not hand off scoped tracks from a superseded generation', async () => {
+        const item = musicItem('stale-track', 'Artist', 'Track');
+        let isCurrent = true;
 
+        useMusicHome([item]);
+        musicApiMocks.samplePtvMusicMixCandidates.mockImplementation(async () => {
+            isCurrent = false;
+
+            return {
+                assertCurrent: vi.fn(),
+                verifyCurrent: vi.fn().mockResolvedValue(undefined),
+                complete: true,
+                items: [item],
+                libraryId: 'music-library-1',
+                received: 1,
+                requests: 1,
+                seedVerified: true,
+                serverId: 'server-1',
+                totalCount: 1,
+                userId: 'user-1'
+            };
+        });
+
+        await expect(buildPtvMusicRecommendations({
+            isCurrent: () => isCurrent,
+            limit: 1,
+            seed: { kind: 'random' },
+            sessionSeed: 'stale-generation'
+        })).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('rejects sampled tracks when the signed-in Music user changes before queue handoff', async () => {
+        const item = musicItem('old-user-track', 'Old User Artist', 'Track');
+
+        useMusicHome([item]);
+        musicApiMocks.samplePtvMusicMixCandidates.mockImplementation(async () => {
+            recommendationScopeMocks.getPtvCurrentUserId.mockReturnValue('user-2');
+
+            return {
+                assertCurrent: vi.fn(),
+                verifyCurrent: vi.fn().mockResolvedValue(undefined),
+                complete: true,
+                items: [item],
+                libraryId: 'music-library-1',
+                received: 1,
+                requests: 1,
+                seedVerified: null,
+                serverId: 'server-1',
+                totalCount: 1,
+                userId: 'user-1'
+            };
+        });
+
+        await expect(buildPtvMusicRecommendations({
+            limit: 1,
+            seed: { kind: 'random' },
+            sessionSeed: 'switched-user'
+        })).rejects.toMatchObject({ name: 'AbortError' });
+    });
+
+    it('rejects a selected-library switch while waiting for Plugin ranking', async () => {
+        const item = musicItem('scope-track', 'Scoped Artist', 'Scoped Track', ['Synth']);
+        let scopeCurrent = true;
+        const assertCurrent = vi.fn(() => {
+            if (!scopeCurrent) throw new DOMException('Music library changed', 'AbortError');
+        });
+        const rankRecommendations = vi.fn().mockImplementation(async () => {
+            scopeCurrent = false;
+
+            return {};
+        });
+
+        useMusicHome([item]);
+        musicApiMocks.samplePtvMusicMixCandidates.mockResolvedValue({
+            assertCurrent,
+            verifyCurrent: vi.fn().mockResolvedValue(undefined),
+            complete: true,
+            items: [item],
+            libraryId: 'music-library-1',
+            received: 1,
+            requests: 2,
+            seedVerified: null,
+            serverId: 'server-1',
+            totalCount: 1,
+            userId: 'user-1'
+        });
+        recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReturnValue({
+            getCurrentUserId: () => 'user-1',
+            getStatus: vi.fn().mockResolvedValue({ featureFlags: { recommendationPolicyV2: true } }),
+            rankRecommendations
+        });
+
+        await expect(buildPtvMusicRecommendations({
+            limit: 1,
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'library-switch-after-sample'
+        })).rejects.toMatchObject({ name: 'AbortError' });
+        expect(rankRecommendations).toHaveBeenCalledTimes(1);
+        expect(assertCurrent).toHaveBeenCalled();
+    });
+
+    it('does not publish after final selected-view verification detects a silent switch', async () => {
+        const item = musicItem('verified-track', 'Scoped Artist', 'Scoped Track', ['Synth']);
+        let pluginFinished = false;
+        const rankRecommendations = vi.fn().mockImplementation(async () => {
+            pluginFinished = true;
+
+            return {};
+        });
+        const verifyCurrent = vi.fn().mockImplementation(async () => {
+            if (pluginFinished) throw new DOMException('Selected Music view changed', 'AbortError');
+        });
+
+        useMusicHome([item]);
+        musicApiMocks.samplePtvMusicMixCandidates.mockResolvedValue({
+            assertCurrent: vi.fn(),
+            verifyCurrent,
+            complete: true,
+            items: [item],
+            libraryId: 'music-library-1',
+            received: 1,
+            requests: 2,
+            seedVerified: null,
+            serverId: 'server-1',
+            totalCount: 1,
+            userId: 'user-1'
+        });
+        recommendationPluginMocks.getCurrentPtvPluginApiClient.mockReturnValue({
+            getCurrentUserId: () => 'user-1',
+            getStatus: vi.fn().mockResolvedValue({ featureFlags: { recommendationPolicyV2: true } }),
+            rankRecommendations
+        });
+
+        await expect(buildPtvMusicRecommendations({
+            limit: 1,
+            seed: { kind: 'genre', label: 'Synth', value: 'Synth' },
+            sessionSeed: 'silent-selected-view-switch'
+        })).rejects.toMatchObject({ name: 'AbortError' });
+        expect(rankRecommendations).toHaveBeenCalledTimes(1);
+        expect(verifyCurrent).toHaveBeenCalledTimes(1);
+        expect(recommendationEventMocks.recordPtvEvent).not.toHaveBeenCalledWith(
+            'recommendation',
+            'music-recommendation-generation-completed',
+            expect.any(Object)
+        );
+    });
+
+    it('rejects work retired before sampling without loading cached Home', async () => {
         useMusicHome([
             musicItem('track-1', 'Artist One', 'Track One')
         ]);
 
         await expect(buildPtvMusicRecommendations({
-            isCurrent,
+            isCurrent: () => false,
             limit: 1,
             seed: {
                 kind: 'random'
@@ -856,6 +1351,7 @@ describe('buildPtvMusicRecommendations()', () => {
         })).rejects.toMatchObject({
             name: 'AbortError'
         });
-        expect(musicApiMocks.fetchPtvMusicTracksForGenerator).not.toHaveBeenCalled();
+        expect(musicApiMocks.getPtvMusicHome).not.toHaveBeenCalled();
+        expect(musicApiMocks.samplePtvMusicMixCandidates).not.toHaveBeenCalled();
     });
 });

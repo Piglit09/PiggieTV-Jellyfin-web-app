@@ -137,6 +137,7 @@ import {
 } from './musicRoutePolicy';
 import { loadPtvProgressiveMusicDetail } from './musicProgressiveDetail';
 import {
+    abortPtvMusicRouteWork,
     beginPtvMusicRouteWork,
     isPtvMusicRouteWorkCurrent,
     retirePtvMusicRouteWork,
@@ -2350,8 +2351,10 @@ type SmartPlaylistPanelProps = Readonly<{
     onGenerated: (result: PtvMusicPlaylistResult) => void;
 }>;
 
-function SmartPlaylistPanel({ generated, onGenerated }: SmartPlaylistPanelProps) {
+export function SmartPlaylistPanel({ generated, onGenerated }: SmartPlaylistPanelProps) {
     const playbackActions = useMusicPlaybackActions();
+    const actionOwner = `smart-playlist-generate:${useId()}`;
+    const displayIdentityKey = getActiveMusicDisplayIdentityKey();
     const [prompt, setPrompt] = useState('Make 50-song discovery mix');
     const [seedKind, setSeedKind] = useState<PtvMusicSeed['kind']>('random');
     const [seedValue, setSeedValue] = useState('');
@@ -2363,18 +2366,49 @@ function SmartPlaylistPanel({ generated, onGenerated }: SmartPlaylistPanelProps)
         value: seedValue
     }), [seedKind, seedValue]);
 
+    useEffect(() => () => {
+        abortPtvMusicRouteWork(actionOwner);
+    }, [actionOwner, displayIdentityKey]);
+
     const onSubmit = (event: FormEvent) => {
         event.preventDefault();
+        const actionIdentityKey = getActiveMusicDisplayIdentityKey();
+
+        if (!actionIdentityKey) {
+            setStatus('Sign in to build a mix.');
+            return;
+        }
+
+        const work = beginPtvMusicRouteWork(actionOwner, actionIdentityKey);
+        const isCurrent = () => {
+            if (getActiveMusicDisplayIdentityKey() !== actionIdentityKey) {
+                retirePtvMusicRouteWork(work);
+                return false;
+            }
+
+            return isPtvMusicRouteWorkCurrent(work);
+        };
+        const sessionSeed = `${actionIdentityKey}:smart-playlist-generate:${Date.now()}:${work.generation}`;
+
         setStatus('Building...');
 
         void generatePtvMusicPlaylist({
+            isCurrent,
             prompt,
-            seed
+            seed,
+            sessionSeed,
+            signal: work.signal
         }).then(result => {
-            onGenerated(result);
+            if (!isCurrent()) return;
+
             setStatus(`${result.items.length} tracks`);
+            onGenerated(result);
         }).catch(error => {
+            if (!isCurrent()) return;
+
             setStatus(error instanceof Error ? error.message : 'Could not build playlist');
+        }).finally(() => {
+            settlePtvMusicRouteWork(work);
         });
     };
 

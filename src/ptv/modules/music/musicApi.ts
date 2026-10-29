@@ -60,6 +60,7 @@ import type {
     PtvMusicLyricsResponse,
     PtvMusicMetadataLookupResponse,
     PtvMusicMediaStream,
+    PtvMusicSeed,
     PtvMusicSection,
     PtvMusicSectionTiming
 } from './musicTypes';
@@ -89,6 +90,12 @@ import {
 const MUSIC_LIST_FIELDS = serializePtvItemFieldProfile('MUSIC_CARD_FIELDS');
 export const PTV_MUSIC_PLAYLIST_PROBE_CONCURRENCY = 4;
 export const PTV_MUSIC_API_REQUEST_CONCURRENCY = 4;
+export const PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE = 48;
+export const PTV_MUSIC_MIX_SAMPLE_MAX_PAGES = 4;
+export const PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS = 1 + PTV_MUSIC_MIX_SAMPLE_MAX_PAGES;
+export const PTV_MUSIC_MIX_SEED_MEMBERSHIP_MAX_PAGES = 3;
+export const PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS = PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS
+    + PTV_MUSIC_MIX_SEED_MEMBERSHIP_MAX_PAGES + 4;
 
 const MUSIC_HOME_CACHE_TTL_MS = 5 * 60 * 1000;
 const MUSIC_HOME_INITIAL_SEED_REUSE_WINDOW_MS = 30 * 1000;
@@ -217,6 +224,7 @@ let musicDataRequestStartedCount = 0;
 let musicDataRequestJoinedCount = 0;
 let musicDataRequestCancelledCount = 0;
 let musicRouteWorkRevision = 0;
+let musicLibraryScopeRevision = 0;
 let lastMusicLibraryDiscovery: {
     detectionReason?: string;
     musicLibrariesFound: PtvMusicLibraryDiscoveryItem[];
@@ -2644,6 +2652,7 @@ function buildSimilarArtistSection(artists: PtvMusicItem[], tracks: PtvMusicItem
 export function invalidatePtvMusicHomeCache() {
     const cacheKey = getCacheKey();
 
+    musicLibraryScopeRevision += 1;
     musicHomeCache.clear();
     musicHomeSummaryCache.clear();
     musicLibraryCache.clear();
@@ -3551,6 +3560,559 @@ export function addPtvMusicItemsToPlaylist(playlistId: string, items: PtvMusicIt
 
         throw error;
     });
+}
+
+export type PtvMusicMixSampleOptions = PtvMusicRouteRequestOptions & {
+    affinityGenres?: string[];
+    seed?: PtvMusicSeed;
+    sessionSeed: string;
+};
+
+export type PtvMusicMixSample = {
+    assertCurrent: () => void;
+    verifyCurrent: () => Promise<void>;
+    complete: boolean;
+    items: PtvMusicItem[];
+    libraryId: string;
+    received: number;
+    requests: number;
+    serverId: string;
+    seedVerified: boolean | null;
+    totalCount: number | null;
+    userId: string;
+};
+
+function hashPtvMusicMixSampleSeed(seed: string, stratum: number) {
+    let hash = 2166136261;
+    const input = `${seed}:${stratum}`;
+
+    for (let index = 0; index < input.length; index += 1) {
+        hash ^= input.charCodeAt(index);
+        hash = Math.imul(hash, 16777619);
+    }
+
+    return hash >>> 0;
+}
+
+function getPtvMusicMixSamplePages(totalCount: number, sessionSeed: string) {
+    const pageCount = Math.min(PTV_MUSIC_MIX_SAMPLE_MAX_PAGES, Math.ceil(totalCount / PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE));
+
+    return Array.from({ length: pageCount }, (_, index) => {
+        if (totalCount <= PTV_MUSIC_MIX_SAMPLE_MAX_PAGES * PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE) {
+            const startIndex = index * PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE;
+
+            return { startIndex, limit: Math.min(PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE, totalCount - startIndex) };
+        }
+
+        const stratumStart = Math.floor(totalCount * index / pageCount);
+        const stratumEnd = Math.floor(totalCount * (index + 1) / pageCount);
+        const limit = Math.min(PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE, stratumEnd - stratumStart);
+        const offsetRange = stratumEnd - stratumStart - limit + 1;
+        const startIndex = stratumStart + hashPtvMusicMixSampleSeed(sessionSeed, index) % offsetRange;
+
+        return { startIndex, limit };
+    });
+}
+
+type PtvMusicMixSeedQuery = (query: PtvItemQuery) => Promise<PtvItemsResult<PtvMusicItem> | null>;
+type PtvMusicMixPageQuery = (startIndex: number, limit: number) => Promise<PtvItemsResult<PtvMusicItem>>;
+
+function isInvalidPtvMusicMixSamplePage(
+    result: PtvItemsResult<PtvMusicItem>,
+    totalCount: number,
+    limit: number
+) {
+    return result.TotalRecordCount !== totalCount
+        || !Array.isArray(result.Items)
+        || result.Items.length > limit
+        || result.Items.length === 0;
+}
+
+function addUniquePtvMusicMixItems(sample: PtvMusicMixSample, seen: Set<string>, items: PtvMusicItem[]) {
+    for (const item of items) {
+        if (item?.Type !== 'Audio' || !item.Id || seen.has(item.Id)) continue;
+        seen.add(item.Id);
+        sample.items.push(item);
+    }
+}
+
+async function loadPtvMusicMixSamplePages(
+    sample: PtvMusicMixSample,
+    sessionSeed: string,
+    queryPage: PtvMusicMixPageQuery,
+    assertCurrent: () => void
+) {
+    const seen = new Set<string>();
+    const totalCount = sample.totalCount || 0;
+
+    for (const page of getPtvMusicMixSamplePages(totalCount, sessionSeed)) {
+        let result: PtvItemsResult<PtvMusicItem>;
+        try {
+            result = await queryPage(page.startIndex, page.limit);
+        } catch (error) {
+            assertCurrent();
+            if (isPtvMusicAbortError(error)) throw error;
+            sample.complete = false;
+            break;
+        }
+
+        if (isInvalidPtvMusicMixSamplePage(result, totalCount, page.limit)) {
+            sample.complete = false;
+            break;
+        }
+
+        const items = result.Items || [];
+        if (items.length < page.limit) sample.complete = false;
+
+        const beforeCount = sample.items.length;
+        addUniquePtvMusicMixItems(sample, seen, items);
+        const validAudioCount = items.filter(item => item?.Type === 'Audio' && item.Id).length;
+        if (sample.items.length - beforeCount < validAudioCount) sample.complete = false;
+
+        if (sample.items.length === beforeCount) {
+            sample.complete = false;
+            break;
+        }
+    }
+
+    return seen;
+}
+
+function isValidPtvMusicMixSeedPage(
+    total: number | undefined,
+    expectedTotal: number | null,
+    startIndex: number,
+    itemCount: number
+): total is number {
+    return typeof total === 'number'
+        && Number.isSafeInteger(total)
+        && total >= 0
+        && (expectedTotal === null || total === expectedTotal)
+        && itemCount === Math.min(PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE, Math.max(0, total - startIndex));
+}
+
+function hasNewPtvMusicMixSeedIds(items: PtvMusicItem[], seen: Set<string>) {
+    const newIds = items.map(item => item?.Id)
+        .filter((id): id is string => Boolean(id && !seen.has(id)));
+    newIds.forEach(id => {
+        seen.add(id);
+    });
+
+    return newIds.length > 0;
+}
+
+function shouldContinuePtvMusicMixSeedSearch(
+    sample: PtvMusicMixSample,
+    items: PtvMusicItem[],
+    seen: Set<string>,
+    startIndex: number,
+    total: number
+) {
+    if (!hasNewPtvMusicMixSeedIds(items, seen) && items.length) {
+        sample.complete = false;
+        return false;
+    }
+    if (items.length < PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE) {
+        if (startIndex + items.length < total) sample.complete = false;
+        return false;
+    }
+
+    return startIndex + items.length < total;
+}
+
+async function findExactPtvMusicMixSeedMember(
+    sample: PtvMusicMixSample,
+    seedId: string,
+    seedType: string,
+    query: PtvItemQuery,
+    querySeed: PtvMusicMixSeedQuery
+) {
+    let expectedTotal: number | null = null;
+    const seen = new Set<string>();
+
+    for (let page = 0; page < PTV_MUSIC_MIX_SEED_MEMBERSHIP_MAX_PAGES; page += 1) {
+        const startIndex = page * PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE;
+        const result = await querySeed({
+            ...query,
+            StartIndex: startIndex
+        });
+        if (!result) return null;
+
+        const total = result.TotalRecordCount;
+        const items = result.Items || [];
+        if (!isValidPtvMusicMixSeedPage(total, expectedTotal, startIndex, items.length)) {
+            sample.complete = false;
+            return null;
+        }
+        expectedTotal = total;
+
+        const match = items.find(item => item?.Id === seedId && item.Type === seedType);
+        if (match) return match;
+
+        if (!shouldContinuePtvMusicMixSeedSearch(sample, items, seen, startIndex, total)) return null;
+    }
+
+    return null;
+}
+
+async function addPtvMusicMixSongSeed(
+    sample: PtvMusicMixSample,
+    seed: PtvMusicSeed,
+    seen: Set<string>,
+    querySeed: PtvMusicMixSeedQuery
+) {
+    const songId = String(seed.item?.Id || seed.id || '').trim();
+    const songName = String(seed.item?.Name || seed.label || '').trim();
+    sample.seedVerified = Boolean(songId && sample.items.some(item => item.Id === songId));
+    if (sample.seedVerified || !songId || !songName) return;
+
+    const matched = await findExactPtvMusicMixSeedMember(sample, songId, 'Audio', {
+        IncludeItemTypes: 'Audio',
+        ParentId: sample.libraryId,
+        SearchTerm: songName
+    }, querySeed);
+    if (!matched) return;
+
+    sample.seedVerified = true;
+    if (!seen.has(songId)) sample.items.push(matched);
+}
+
+function getPtvMusicMixRelatedSeedIdentity(seed: PtvMusicSeed) {
+    const seedItem = seed.item;
+    const isAlbumTrack = seed.kind === 'album' && seedItem?.Type === 'Audio';
+
+    return {
+        id: String(isAlbumTrack ? seedItem.AlbumId || seed.id || '' : seedItem?.Id || seed.id || '').trim(),
+        name: String(isAlbumTrack ? seedItem.Album || seed.label || '' : seedItem?.Name || seed.label || '').trim(),
+        type: seed.kind === 'album' ? 'MusicAlbum' : 'MusicArtist'
+    };
+}
+
+function addPtvMusicMixRelatedTracks(
+    sample: PtvMusicMixSample,
+    seen: Set<string>,
+    related: PtvMusicItem[],
+    kind: 'album' | 'artist',
+    seedId: string
+) {
+    for (const item of related) {
+        if (!item?.Id || item.Type !== 'Audio' || seen.has(item.Id)) continue;
+        if (kind === 'album' && item.AlbumId !== seedId) continue;
+        const artistRefs = [
+            ...(item.ArtistItems || []),
+            ...(item.AlbumArtists || [])
+        ];
+        // A scoped ArtistIds response is the relationship authority when the list DTO omits artist projections.
+        if (kind === 'artist' && artistRefs.length && !artistRefs.some(artist => artist.Id === seedId)) continue;
+        seen.add(item.Id);
+        sample.items.push(item);
+    }
+}
+
+async function addPtvMusicMixRelatedSeed(
+    sample: PtvMusicMixSample,
+    seed: PtvMusicSeed,
+    seen: Set<string>,
+    querySeed: PtvMusicMixSeedQuery
+) {
+    const identity = getPtvMusicMixRelatedSeedIdentity(seed);
+    sample.seedVerified = false;
+    if (!identity.id || !identity.name) return;
+
+    const membership = await findExactPtvMusicMixSeedMember(sample, identity.id, identity.type, {
+        IncludeItemTypes: identity.type,
+        ParentId: sample.libraryId,
+        SearchTerm: identity.name
+    }, querySeed);
+    if (!membership) return;
+
+    sample.seedVerified = true;
+    const isAlbum = seed.kind === 'album';
+    const related = await querySeed(isAlbum ? {
+        IncludeItemTypes: 'Audio',
+        ParentId: identity.id,
+        SortBy: 'ParentIndexNumber,IndexNumber,SortName'
+    } : {
+        ArtistIds: identity.id,
+        IncludeItemTypes: 'Audio',
+        ParentId: sample.libraryId
+    });
+    addPtvMusicMixRelatedTracks(sample, seen, related?.Items || [], isAlbum ? 'album' : 'artist', identity.id);
+}
+
+async function addPtvMusicMixSeed(
+    sample: PtvMusicMixSample,
+    seed: PtvMusicSeed,
+    seen: Set<string>,
+    querySeed: PtvMusicMixSeedQuery
+) {
+    if (seed.kind === 'song') {
+        await addPtvMusicMixSongSeed(sample, seed, seen, querySeed);
+    } else if (seed.kind === 'album' || seed.kind === 'artist') {
+        await addPtvMusicMixRelatedSeed(sample, seed, seen, querySeed);
+    }
+}
+
+function getPtvMusicMixAffinityGenres(options: PtvMusicMixSampleOptions) {
+    if (options.seed?.kind !== 'genre' && options.seed?.kind !== 'random') return [];
+    let rawTerms: string[] = [];
+    if (Array.isArray(options.affinityGenres) && options.affinityGenres.length) {
+        rawTerms = options.affinityGenres;
+    } else if (options.seed.kind === 'genre') {
+        rawTerms = [options.seed.value || options.seed.label || ''];
+    }
+    const terms = Array.from(new Set(rawTerms
+        .filter((term): term is string => typeof term === 'string')
+        .map(term => term.trim())
+        .filter(term => term.length > 0 && term.length <= 64 && !/[\r\n]/.test(term))))
+        .slice(0, 8);
+    if (options.seed.kind === 'random') {
+        const second = terms.length > 1 ? terms[1 + hashPtvMusicMixSampleSeed(options.sessionSeed, 8) % (terms.length - 1)] : '';
+
+        return [terms[0], second].filter((genre): genre is string => Boolean(genre));
+    }
+    const seedLabels = new Set([options.seed.value, options.seed.label]
+        .map(label => String(label || '').trim().toLowerCase())
+        .filter(Boolean));
+    const literal = [options.seed.value, options.seed.label]
+        .map(label => String(label || '').trim())
+        .find(label => label.length > 0 && label.length <= 64 && !/[\r\n]/.test(label)) || '';
+    const mappedTerms = terms.filter(term => !seedLabels.has(term.toLowerCase()));
+    const mapped = mappedTerms.length ?
+        mappedTerms[hashPtvMusicMixSampleSeed(options.sessionSeed, 8) % mappedTerms.length] : '';
+
+    return [literal || terms[0], mapped].filter((genre): genre is string => Boolean(genre));
+}
+
+async function addPtvMusicMixAffinityPages(
+    sample: PtvMusicMixSample,
+    options: PtvMusicMixSampleOptions,
+    seen: Set<string>,
+    querySeed: PtvMusicMixSeedQuery
+) {
+    const recent = await querySeed({
+        IncludeItemTypes: 'Audio',
+        Limit: Math.min(PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE, sample.totalCount || PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE),
+        ParentId: sample.libraryId,
+        SortBy: 'DatePlayed,SortName',
+        SortOrder: 'Descending',
+        StartIndex: 0
+    });
+    addUniquePtvMusicMixItems(sample, seen, recent?.Items || []);
+
+    for (const genre of getPtvMusicMixAffinityGenres(options)) {
+        const related = await querySeed({
+            Genres: genre,
+            IncludeItemTypes: 'Audio',
+            ParentId: sample.libraryId,
+            StartIndex: 0
+        });
+        addUniquePtvMusicMixItems(sample, seen, related?.Items || []);
+    }
+}
+
+/**
+ * Samples one selected user Music view without the generic Music list's unscoped fallback.
+ * At most two view reads (discovery and no-store publication check), one count
+ * probe, four 48-item strata, one recent
+ * scoped page, two genre-affinity pages, three membership pages, and one related
+ * track page are issued: 12 item requests and 529 returned items at most.
+ */
+export async function samplePtvMusicMixCandidates(options: PtvMusicMixSampleOptions): Promise<PtvMusicMixSample> {
+    const serverId = getPtvServerId();
+    const userId = getPtvCurrentUserId(serverId);
+    const routeRevision = musicRouteWorkRevision;
+    const scopeRevision = musicLibraryScopeRevision;
+    const libraryCacheKey = `${serverId}:${userId}`;
+    let selectedLibraryId = '';
+    const assertCurrent = () => {
+        throwIfPtvMusicRouteWorkRetired(options);
+        if (
+            !serverId
+            || !userId
+            || getPtvServerId() !== serverId
+            || getPtvCurrentUserId(serverId) !== userId
+            || musicRouteWorkRevision !== routeRevision
+            || musicLibraryScopeRevision !== scopeRevision
+            || (selectedLibraryId && musicLibraryCache.has(libraryCacheKey)
+                && musicLibraryCache.get(libraryCacheKey)?.id !== selectedLibraryId)
+        ) {
+            throw createPtvMusicAbortError('PiggieTV Music Mix identity or library scope changed.');
+        }
+    };
+
+    assertCurrent();
+    const viewResult = await runPtvMusicApiRequest(() => {
+        assertCurrent();
+        return getPtvUserViews({ serverId, userId, signal: options.signal });
+    }, options.signal);
+    assertCurrent();
+    const selectedLibrary = (Array.isArray(viewResult.Items) ? viewResult.Items : [])
+        .find(library => library?.Id && isMusicLibrary(library));
+    if (!selectedLibrary?.Id) {
+        throw new Error('The selected Music library could not be resolved for this mix.');
+    }
+
+    const libraryId = selectedLibrary.Id;
+    selectedLibraryId = libraryId;
+    assertCurrent();
+    const verifyCurrent = async () => {
+        assertCurrent();
+        let currentViews: PtvItemsResult<PtvLibrary>;
+        try {
+            currentViews = await runPtvMusicApiRequest(() => {
+                assertCurrent();
+                return getPtvUserViews({ fresh: true, serverId, userId, signal: options.signal });
+            }, options.signal);
+        } catch (error) {
+            assertCurrent();
+            if (isPtvMusicAbortError(error)) throw error;
+            throw createPtvMusicAbortError('PiggieTV Music Mix view could not be verified before publication.');
+        }
+        assertCurrent();
+        const currentLibrary = (Array.isArray(currentViews.Items) ? currentViews.Items : [])
+            .find(library => library?.Id && isMusicLibrary(library));
+        if (currentLibrary?.Id !== libraryId) {
+            throw createPtvMusicAbortError('PiggieTV Music Mix selected library changed before publication.');
+        }
+    };
+    const sample: PtvMusicMixSample = {
+        assertCurrent,
+        verifyCurrent,
+        complete: true,
+        items: [],
+        libraryId,
+        received: 0,
+        requests: 0,
+        serverId,
+        seedVerified: null,
+        totalCount: null,
+        userId
+    };
+    const queryPage = async (startIndex: number, limit: number) => {
+        assertCurrent();
+        sample.requests += 1;
+        const result = await runPtvMusicApiRequest(() => {
+            assertCurrent();
+            return getPtvItems<PtvMusicItem>({
+                EnableTotalRecordCount: true,
+                Fields: MUSIC_LIST_FIELDS,
+                IncludeItemTypes: 'Audio',
+                Limit: limit,
+                ParentId: libraryId,
+                Recursive: true,
+                SortBy: 'SortName',
+                SortOrder: 'Ascending',
+                StartIndex: startIndex
+            }, { serverId, userId, signal: options.signal });
+        }, options.signal);
+
+        assertCurrent();
+        if (Array.isArray(result.Items)) sample.received += result.Items.length;
+
+        return result;
+    };
+    let artistEndpoint = 'Artists';
+    const requestSeedPage = (query: PtvItemQuery) => query.IncludeItemTypes === 'MusicArtist' ?
+        requestPtvJson<PtvItemsResult<PtvMusicItem>>(artistEndpoint, {
+            params: {
+                EnableTotalRecordCount: true,
+                Fields: MUSIC_LIST_FIELDS,
+                Limit: PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE,
+                Recursive: true,
+                SortBy: 'SortName',
+                SortOrder: 'Ascending',
+                ...query,
+                ParentId: libraryId,
+                UserId: userId
+            },
+            serverId,
+            signal: options.signal
+        }) : getPtvItems<PtvMusicItem>({
+            EnableTotalRecordCount: true,
+            Fields: MUSIC_LIST_FIELDS,
+            Limit: PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE,
+            Recursive: true,
+            SortBy: 'SortName',
+            SortOrder: 'Ascending',
+            ...query
+        }, { serverId, userId, signal: options.signal });
+    const querySeed = async (query: PtvItemQuery): Promise<PtvItemsResult<PtvMusicItem> | null> => {
+        assertCurrent();
+        sample.requests += 1;
+        try {
+            const requestSeedTransport = () => runPtvMusicApiRequest(() => {
+                assertCurrent();
+                return requestSeedPage(query);
+            }, options.signal);
+            let result: PtvItemsResult<PtvMusicItem>;
+            try {
+                result = await requestSeedTransport();
+            } catch (error) {
+                assertCurrent();
+                if (query.IncludeItemTypes !== 'MusicArtist' || artistEndpoint !== 'Artists' || isPtvMusicAbortError(error)) {
+                    throw error;
+                }
+                artistEndpoint = 'Artists/AlbumArtists';
+                sample.requests += 1;
+                result = await requestSeedTransport();
+            }
+
+            assertCurrent();
+            if (
+                query.IncludeItemTypes === 'MusicArtist'
+                && artistEndpoint === 'Artists'
+                && result.TotalRecordCount === 0
+                && !result.Items?.length
+            ) {
+                artistEndpoint = 'Artists/AlbumArtists';
+                sample.requests += 1;
+                result = await runPtvMusicApiRequest(() => {
+                    assertCurrent();
+                    return requestSeedPage(query);
+                }, options.signal);
+                assertCurrent();
+            }
+            if (!Array.isArray(result.Items) || result.Items.length > PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE) {
+                sample.complete = false;
+                return null;
+            }
+            sample.received += result.Items.length;
+
+            return result;
+        } catch (error) {
+            assertCurrent();
+            if (isPtvMusicAbortError(error)) throw error;
+            sample.complete = false;
+            return null;
+        }
+    };
+
+    let probe: PtvItemsResult<PtvMusicItem>;
+    try {
+        probe = await queryPage(0, 1);
+    } catch (error) {
+        assertCurrent();
+        if (isPtvMusicAbortError(error)) throw error;
+        sample.complete = false;
+        return sample;
+    }
+
+    const totalCount = probe.TotalRecordCount;
+    if (typeof totalCount !== 'number' || !Number.isSafeInteger(totalCount) || totalCount < 0 || !Array.isArray(probe.Items) || probe.Items.length > 1) {
+        sample.complete = false;
+        return sample;
+    }
+    sample.totalCount = totalCount;
+    if (totalCount === 0) return sample;
+
+    const seen = await loadPtvMusicMixSamplePages(sample, options.sessionSeed, queryPage, assertCurrent);
+
+    if (sample.complete) await addPtvMusicMixAffinityPages(sample, options, seen, querySeed);
+    if (options.seed) await addPtvMusicMixSeed(sample, options.seed, seen, querySeed);
+
+    assertCurrent();
+    return sample;
 }
 
 export function fetchPtvMusicTracksForGenerator(
