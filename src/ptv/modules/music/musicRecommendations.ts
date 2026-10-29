@@ -19,6 +19,7 @@ import {
 } from '../../core/recommendations/recommendationPolicyContracts';
 import { shouldExcludePtvRecommendationItem } from '../recommendations/feedback/recommendationFeedback';
 import { isPlayablePtvMusicTrack } from './musicPlaybackItem';
+import { getPtvCurrentUserId, getPtvServerId } from '../../api';
 
 const DEFAULT_TRACK_LIMIT = 28;
 const DEFAULT_GENERATED_MIX_LIMIT = 50;
@@ -1038,15 +1039,6 @@ function createPtvMusicMixAbortError(message: string) {
     });
 }
 
-function isPtvMusicMixAbortError(error: unknown) {
-    const errorName = error && typeof error === 'object' ?
-        String((error as { name?: unknown }).name || '') :
-        '';
-    const message = error instanceof Error ? error.message : String(error || '');
-
-    return errorName === 'AbortError' || /abort|cancel|superseded/i.test(message);
-}
-
 function throwIfPtvMusicMixRetired(request: PtvMusicPlaylistRequest) {
     if (request.signal?.aborted) {
         throw createPtvMusicMixAbortError('PiggieTV Music mix generation was aborted.');
@@ -1432,12 +1424,12 @@ function prioritizeAndFilterGeneratedMusicCandidates(
     items: PtvMusicItem[],
     seed: PtvMusicSeed,
     request: PtvMusicPlaylistRequest,
-    intent: PtvMusicMixIntent
+    intent: PtvMusicMixIntent,
+    sessionKey: string
 ) {
-    const uniqueItems = uniquePtvMusicItems([
-        ...(seed.item && isPlayablePtvMusicTrack(seed.item) ? [seed.item] : []),
-        ...items
-    ])
+    // Only the fresh, explicitly library-scoped response proves membership. Cached Home
+    // shelves and the caller's seed DTO may contain items from another Music view.
+    const uniqueItems = uniquePtvMusicItems(items)
         .filter(isPlayablePtvMusicTrack)
         .filter(item => matchesRequestedMusicCodec(item, intent.requestedCodec));
     const directSeedItems = uniqueItems.filter(item => isDirectMusicSeedMatch(item, seed));
@@ -1448,6 +1440,16 @@ function prioritizeAndFilterGeneratedMusicCandidates(
     );
     const requiresStrictAffinity = seed.kind !== 'favorites'
         && (seed.kind !== 'random' || intent.affinityTerms.length > 0);
+
+    if (
+        (intent.affinityTerms.length > 0 || requiresStrictAffinity)
+        && !directSeedItems.length
+        && !intentItems.length
+        && !seedAffinityItems.length
+    ) {
+        return [];
+    }
+
     let eligibleItems = uniqueItems;
 
     if (hasExplicitPromptMatch) {
@@ -1456,51 +1458,44 @@ function prioritizeAndFilterGeneratedMusicCandidates(
         eligibleItems = uniquePtvMusicItems([ ...directSeedItems, ...seedAffinityItems ]);
     }
 
-    return uniquePtvMusicItems([
+    const eligible = uniquePtvMusicItems([
         ...directSeedItems,
         ...intentItems,
         ...eligibleItems
     ])
         .filter(item => !shouldExcludePtvRecommendationItem(item, request.feedback, {
             excludeCompleted: false
-        }))
-        .slice(0, MAX_GENERATED_MIX_CANDIDATES);
-}
+        }));
 
-function shouldFetchGeneratedMusicFallback(
-    candidates: PtvMusicItem[],
-    seed: PtvMusicSeed,
-    intent: PtvMusicMixIntent,
-    limit: number
-) {
-    const directSeedRequired = ['album', 'artist', 'genre', 'song'].includes(seed.kind);
-    const promptMatchRequired = intent.affinityTerms.length > 0;
+    if (eligible.length <= MAX_GENERATED_MIX_CANDIDATES) return eligible;
 
-    return candidates.length < limit
-        || (directSeedRequired && !candidates.some(item => isDirectMusicSeedMatch(item, seed)))
-        || (promptMatchRequired && !candidates.some(item => getMusicMixIntentScore(intent, item) > 0));
-}
-
-function getGeneratedMusicFallbackQuery(seed: PtvMusicSeed) {
-    if (seed.kind === 'album') {
-        const seedType = normalizeMusicMixValue(seed.item?.Type);
-        const parentId = seedType === 'musicalbum' ?
-            seed.item?.Id :
-            seed.item?.AlbumId || seed.id;
-
-        if (parentId) {
-            return {
-                ParentId: parentId,
-                SortBy: 'ParentIndexNumber,IndexNumber,SortName',
-                SortOrder: 'Ascending'
-            };
+    // Rank *before* the 300-item Plugin boundary. A later library page has the
+    // same opportunity as the fresh Home-like page. Existing affinity, discovery,
+    // and seed scores still determine relevance. The session key breaks ties in a
+    // reproducible way and lets distinct explicit generations vary membership.
+    const ranked = eligible
+        .map(item => getGeneratedMusicCandidate(item, seed, intent, sessionKey))
+        .sort((left, right) => Number(right.directSeedMatch) - Number(left.directSeedMatch)
+            || compareGeneratedMusicCandidates(left, right));
+    const discoveryTarget = Math.round(
+        MAX_GENERATED_MIX_CANDIDATES * getGeneratedMusicMixPolicy(seed, intent).discoveryRatio
+    );
+    const selected = new Map<string, PtvGeneratedMusicCandidate>();
+    const take = (candidates: PtvGeneratedMusicCandidate[], limit: number) => {
+        for (const candidate of candidates) {
+            if (selected.size >= limit) break;
+            selected.set(candidate.itemKey, candidate);
         }
-    }
-
-    return {
-        SortBy: 'DatePlayed,PlayCount,SortName',
-        SortOrder: 'Ascending'
     };
+
+    take(ranked.filter(candidate => candidate.directSeedMatch), MAX_GENERATED_MIX_CANDIDATES);
+    take(ranked.filter(candidate => !candidate.familiar), Math.min(
+        MAX_GENERATED_MIX_CANDIDATES,
+        selected.size + discoveryTarget
+    ));
+    take(ranked, MAX_GENERATED_MIX_CANDIDATES);
+
+    return Array.from(selected.values(), candidate => candidate.item);
 }
 
 export async function buildPtvMusicRecommendations(
@@ -1511,14 +1506,12 @@ export async function buildPtvMusicRecommendations(
         Date.now();
 
     throwIfPtvMusicMixRetired(request);
-    const { getPtvMusicHome, fetchPtvMusicTracksForGenerator } = await import('./musicApi');
+    const { samplePtvMusicMixCandidates } = await import('./musicApi');
     const limit = getGeneratedMusicMixLimit(request.limit);
     const seed = getDefaultMusicSeed(request.seed);
     const intent = getMusicMixIntent(request, seed);
     const policy = getGeneratedMusicMixPolicy(seed, intent);
-    const policyClientPromise = getMusicRecommendationPolicyClient(request.signal);
-    let fallbackReason = 'none';
-    let fallbackUsed = false;
+    const sessionKey = getMusicMixSessionKey(request, seed);
 
     recordPtvEvent('recommendation', 'music-recommendation-generation-started', {
         algorithmId: PTV_RECOMMENDATION_ALGORITHM_ID,
@@ -1528,51 +1521,40 @@ export async function buildPtvMusicRecommendations(
     });
 
     throwIfPtvMusicMixRetired(request);
-    const homeData = await getPtvMusicHome({
+    const sample = await samplePtvMusicMixCandidates({
+        affinityGenres: seed.kind === 'genre' || seed.kind === 'random' ? intent.affinityTerms : [],
         isCurrent: request.isCurrent,
+        seed,
+        sessionSeed: sessionKey,
         signal: request.signal
     });
-
-    throwIfPtvMusicMixRetired(request);
-    const homeItems = homeData.sections.flatMap(section => section.items);
-    let candidates = prioritizeAndFilterGeneratedMusicCandidates(homeItems, seed, request, intent);
-
-    if (shouldFetchGeneratedMusicFallback(candidates, seed, intent, limit)) {
-        const fallbackLimit = Math.min(MAX_GENERATED_MIX_LIMIT, Math.max(48, limit * 2));
-        let fallbackItems: PtvMusicItem[] = [];
-
-        fallbackUsed = true;
-        fallbackReason = candidates.length < limit ? 'insufficient-home-candidates' : 'missing-required-affinity';
-        recordPtvEvent('recommendation', 'music-recommendation-fallback-started', {
-            algorithmId: PTV_RECOMMENDATION_ALGORITHM_ID,
-            algorithmPolicyId: PTV_RECOMMENDATION_POLICY_VERSION,
-            candidateCount: candidates.length,
-            fallbackLimit,
-            fallbackReason,
-            surface: policy.surface
-        });
-
+    const assertCurrentScope = () => {
         throwIfPtvMusicMixRetired(request);
-        try {
-            fallbackItems = await fetchPtvMusicTracksForGenerator(
-                getGeneratedMusicFallbackQuery(seed),
-                fallbackLimit,
-                request.signal
-            ) || [];
-        } catch (error) {
-            throwIfPtvMusicMixRetired(request);
-            if (isPtvMusicMixAbortError(error)) throw error;
-            fallbackReason = 'fallback-request-failed';
+        sample.assertCurrent();
+        if (
+            getPtvServerId() !== sample.serverId
+            || getPtvCurrentUserId(sample.serverId) !== sample.userId
+        ) {
+            throw createPtvMusicMixAbortError('PiggieTV Music mix identity changed.');
         }
-        throwIfPtvMusicMixRetired(request);
-        candidates = prioritizeAndFilterGeneratedMusicCandidates([
-            ...candidates,
-            ...fallbackItems
-        ], seed, request, intent);
-    }
+    };
 
-    throwIfPtvMusicMixRetired(request);
-    const sessionKey = getMusicMixSessionKey(request, seed);
+    assertCurrentScope();
+    if (
+        ['album', 'artist', 'song'].includes(seed.kind)
+        && sample.seedVerified !== true
+    ) {
+        throw new Error('The requested Music mix seed is not verified in the selected library.');
+    }
+    const candidates = prioritizeAndFilterGeneratedMusicCandidates(
+        sample.items,
+        seed,
+        request,
+        intent,
+        sessionKey
+    );
+
+    assertCurrentScope();
     const localItems = selectGeneratedMusicMix(
         candidates,
         seed,
@@ -1580,6 +1562,7 @@ export async function buildPtvMusicRecommendations(
         limit,
         sessionKey
     );
+    const policyClientPromise = getMusicRecommendationPolicyClient(request.signal);
     const pluginRank = await rankGeneratedMusicMixWithPlugin(
         await policyClientPromise,
         candidates,
@@ -1590,9 +1573,14 @@ export async function buildPtvMusicRecommendations(
         sessionKey
     );
 
-    throwIfPtvMusicMixRetired(request);
+    await sample.verifyCurrent();
+    assertCurrentScope();
     const items = pluginRank.items || localItems;
-    const resultFallbackReason = pluginRank.fallbackReason !== 'none' ? pluginRank.fallbackReason : fallbackReason;
+    let resultFallbackReason = pluginRank.fallbackReason;
+
+    if (resultFallbackReason === 'none' && !sample.complete) {
+        resultFallbackReason = 'sample-partial';
+    }
     const familiarCount = items.filter(isFamiliarMusicMixItem).length;
     const discoveryCount = Math.max(0, items.length - familiarCount);
 
@@ -1618,13 +1606,17 @@ export async function buildPtvMusicRecommendations(
         candidateCount: candidates.length,
         discoveryCount,
         fallbackReason: resultFallbackReason,
-        fallbackUsed: fallbackUsed || pluginRank.source === 'local-v2',
+        fallbackUsed: !sample.complete || pluginRank.source === 'local-v2',
         familiarCount,
         itemCount: items.length,
         latencyMs: Number((generationFinishedAt - generationStartedAt).toFixed(1)),
         source: pluginRank.source,
-        sourceItemCount: homeItems.length,
-        surface: policy.surface
+        sourceItemCount: sample.items.length,
+        surface: policy.surface,
+        sampleItemCount: sample.items.length,
+        sampleReceivedCount: sample.received,
+        sampleRequestCount: sample.requests,
+        selectedLibraryId: sample.libraryId
     });
 
     return {

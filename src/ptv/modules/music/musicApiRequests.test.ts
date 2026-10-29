@@ -60,9 +60,15 @@ import {
     fetchPtvMusicTracks,
     fetchPtvMusicVideos,
     getPtvMusicHome,
+    getPtvMusicLibrary,
     invalidatePtvMusicHomeCache,
     PTV_MUSIC_API_REQUEST_CONCURRENCY,
-    PTV_MUSIC_PLAYLIST_PROBE_CONCURRENCY
+    PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS,
+    PTV_MUSIC_MIX_SAMPLE_MAX_PAGES,
+    PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS,
+    PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE,
+    PTV_MUSIC_PLAYLIST_PROBE_CONCURRENCY,
+    samplePtvMusicMixCandidates
 } from './musicApi';
 import type { PtvMusicHomeData, PtvMusicItem } from './musicTypes';
 
@@ -196,6 +202,856 @@ describe('PiggieTV Music list requests', () => {
         vi.mocked(recordPtvEvent).mockReset();
         invalidatePtvMusicHomeCache();
         localStorage.removeItem('ptv.music.liked.v2:server-1:user-1');
+    });
+
+    it('samples later Music pages within a captured user and library scope with deterministic bounded requests', async () => {
+        mockSelectedMusicLibrary();
+        const library = Array.from({ length: 2100 }, (_, index): PtvMusicItem => ({
+            Id: `track-${index}`,
+            Name: `Track ${index}`,
+            Type: 'Audio'
+        }));
+
+        vi.mocked(getPtvItems).mockImplementation(async query => ({
+            Items: library.slice(Number(query?.StartIndex || 0), Number(query?.StartIndex || 0) + Number(query?.Limit || 0)),
+            TotalRecordCount: library.length
+        }));
+
+        const first = await samplePtvMusicMixCandidates({ sessionSeed: 'same-seed' });
+        const firstQueries = vi.mocked(getPtvItems).mock.calls.map(([query]) => query);
+        const firstOptions = vi.mocked(getPtvItems).mock.calls.map(([, options]) => options);
+
+        expect(first.libraryId).toBe('music-library-1');
+        expect(first.serverId).toBe('server-1');
+        expect(first.userId).toBe('user-1');
+        expect(first.totalCount).toBe(2100);
+        expect(first.complete).toBe(true);
+        expect(first.requests).toBe(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS + 1);
+        expect(first.received).toBeLessThanOrEqual(1 + (PTV_MUSIC_MIX_SAMPLE_MAX_PAGES + 1) * PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE);
+        expect(first.items.some(item => Number(item.Id?.split('-')[1]) > 300)).toBe(true);
+        expect(new Set(firstQueries.slice(1, PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS).map(query => query?.StartIndex)).size)
+            .toBe(PTV_MUSIC_MIX_SAMPLE_MAX_PAGES);
+        expect(firstQueries).toHaveLength(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS + 1);
+        firstQueries.slice(0, PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS).forEach(query => {
+            expect(query).toEqual(expect.objectContaining({
+                EnableTotalRecordCount: true,
+                IncludeItemTypes: 'Audio',
+                ParentId: 'music-library-1',
+                Recursive: true,
+                SortBy: 'SortName',
+                SortOrder: 'Ascending'
+            }));
+            expect(query?.Limit).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE);
+        });
+        expect(firstQueries.at(-1)).toEqual(expect.objectContaining({
+            IncludeItemTypes: 'Audio',
+            ParentId: 'music-library-1',
+            SortBy: 'DatePlayed,SortName',
+            SortOrder: 'Descending',
+            StartIndex: 0
+        }));
+        firstOptions.forEach(options => {
+            expect(options).toEqual(expect.objectContaining({
+                serverId: 'server-1',
+                userId: 'user-1'
+            }));
+        });
+        expect(getPtvUserViews).toHaveBeenCalledWith(expect.objectContaining({
+            serverId: 'server-1',
+            userId: 'user-1'
+        }));
+
+        vi.mocked(getPtvItems).mockClear();
+        const again = await samplePtvMusicMixCandidates({ sessionSeed: 'same-seed' });
+        const different = await samplePtvMusicMixCandidates({ sessionSeed: 'different-seed' });
+        expect(again.items.map(item => item.Id)).toEqual(first.items.map(item => item.Id));
+        expect(new Set(different.items.map(item => item.Id))).not.toEqual(new Set(first.items.map(item => item.Id)));
+    });
+
+    it('does not issue an unscoped Mix query if the Music view cannot be resolved', async () => {
+        vi.mocked(getPtvUserViews).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+
+        await expect(samplePtvMusicMixCandidates({ sessionSeed: 'unresolved' }))
+            .rejects.toThrow('selected Music library');
+        expect(getPtvItems).not.toHaveBeenCalled();
+    });
+
+    it('adds fresh user-scoped recent tracks without admitting an unrelated Home-only track', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.SortBy === 'DatePlayed,SortName') {
+                return {
+                    Items: [{ Id: 'recent-in-selected-view', Type: 'Audio' }],
+                    TotalRecordCount: 2100
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `selected-view-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'fresh-recent' });
+
+        expect(result.items.map(item => item.Id)).toContain('recent-in-selected-view');
+        expect(result.items.map(item => item.Id)).not.toContain('foreign-home-only');
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query], index) => (
+            query?.ParentId === 'music-library-1'
+            && vi.mocked(getPtvItems).mock.calls[index]?.[1]?.userId === 'user-1'
+        ))).toBe(true);
+        expect(result.requests).toBe(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS + 1);
+    });
+
+    it('retains a rare explicit genre outside all stratified and recent windows via one scoped affinity request', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.Genres === 'Darkwave') {
+                return {
+                    Items: [{ Genres: ['Darkwave'], Id: 'rare-genre-track', Type: 'Audio' }],
+                    TotalRecordCount: 1
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Genres: ['Pop'],
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            affinityGenres: ['Darkwave'],
+            seed: { kind: 'genre', label: 'Darkwave', value: 'Darkwave' },
+            sessionSeed: 'rare-darkwave'
+        });
+        const genreQueries = vi.mocked(getPtvItems).mock.calls.filter(([query]) => query?.Genres);
+
+        expect(result.items.map(item => item.Id)).toContain('rare-genre-track');
+        expect(genreQueries).toHaveLength(1);
+        expect(genreQueries[0]?.[0]).toEqual(expect.objectContaining({
+            Genres: 'Darkwave',
+            IncludeItemTypes: 'Audio',
+            ParentId: 'music-library-1',
+            StartIndex: 0
+        }));
+        expect(genreQueries[0]?.[1]).toEqual(expect.objectContaining({ serverId: 'server-1', userId: 'user-1' }));
+        expect(result.requests).toBe(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS + 2);
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
+        expect(result.received).toBeLessThanOrEqual(529);
+    });
+
+    it('queries both an exact mood-named genre and one mapped genre reproducibly within selected scope', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.Genres) {
+                return {
+                    Items: [{ Genres: [String(query.Genres)], Id: `genre-${query.Genres}`, Type: 'Audio' }],
+                    TotalRecordCount: 1
+                };
+            }
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `track-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const options = {
+            affinityGenres: ['Focus', 'Ambient', 'Classical'],
+            seed: { kind: 'genre' as const, label: 'Focus', value: 'Focus' },
+            sessionSeed: 'focus-mood'
+        };
+        const first = await samplePtvMusicMixCandidates(options);
+        const firstGenres = vi.mocked(getPtvItems).mock.calls.map(([query]) => query?.Genres).filter(Boolean);
+        vi.mocked(getPtvItems).mockClear();
+        await samplePtvMusicMixCandidates(options);
+        const secondGenres = vi.mocked(getPtvItems).mock.calls.map(([query]) => query?.Genres).filter(Boolean);
+
+        expect(firstGenres[0]).toBe('Focus');
+        expect(['Ambient', 'Classical']).toContain(firstGenres[1]);
+        expect(first.items.map(item => item.Id)).toContain('genre-Focus');
+        expect(first.items.map(item => item.Id)).toContain(`genre-${firstGenres[1]}`);
+        expect(secondGenres).toEqual(firstGenres);
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query]) => query?.ParentId === 'music-library-1')).toBe(true);
+        expect(first.requests).toBe(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS + 3);
+    });
+
+    it('uses explicit random-prompt affinity to retrieve a rare genre beyond sampled windows', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.Genres) {
+                return {
+                    Items: [{ Genres: [String(query.Genres)], Id: `genre-${query.Genres}`, Type: 'Audio' }],
+                    TotalRecordCount: 1
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Genres: ['Pop'],
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            affinityGenres: ['Darkwave', 'Synth'],
+            seed: { kind: 'random', label: 'Discovery' },
+            sessionSeed: 'random-darkwave-prompt'
+        });
+        const genreQueries = vi.mocked(getPtvItems).mock.calls.filter(([query]) => query?.Genres);
+
+        expect(result.items.map(item => item.Id)).toContain('genre-Darkwave');
+        expect(genreQueries.map(([query]) => query?.Genres)).toEqual(['Darkwave', 'Synth']);
+        expect(genreQueries.every(([query], index) => (
+            query?.ParentId === 'music-library-1'
+            && genreQueries[index]?.[1]?.userId === 'user-1'
+        ))).toBe(true);
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
+    });
+
+    it('samples a small Music library once without padding or repeated page requests', async () => {
+        mockSelectedMusicLibrary();
+        const tracks: PtvMusicItem[] = [
+            { Id: 'small-1', Type: 'Audio' },
+            { Id: 'small-2', Type: 'Audio' },
+            { Id: 'small-3', Type: 'Audio' }
+        ];
+        vi.mocked(getPtvItems).mockImplementation(async query => ({
+            Items: tracks.slice(Number(query?.StartIndex || 0), Number(query?.StartIndex || 0) + Number(query?.Limit || 0)),
+            TotalRecordCount: tracks.length
+        }));
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'small-library' });
+
+        expect(result.complete).toBe(true);
+        expect(result.items.map(item => item.Id)).toEqual(['small-1', 'small-2', 'small-3']);
+        expect(result.requests).toBe(3);
+        expect(vi.mocked(getPtvItems).mock.calls.map(([query]) => query?.Limit)).toEqual([1, 3, 3]);
+    });
+
+    it('marks an unexpectedly short sampled page partial when Jellyfin still reports many items', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => ({
+            Items: [{ Id: `track-${query?.StartIndex}`, Type: 'Audio' }],
+            TotalRecordCount: 2100
+        }));
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'short-page' });
+
+        expect(result.complete).toBe(false);
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS);
+        expect(result.items.length).toBeGreaterThan(0);
+    });
+
+    it('stops bounded Mix sampling when a later page changes the total', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => ({
+            Items: [{ Id: `track-${query?.StartIndex}`, Type: 'Audio' }],
+            TotalRecordCount: vi.mocked(getPtvItems).mock.calls.length > 1 ? 2101 : 2100
+        }));
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'changing-total' });
+
+        expect(result.complete).toBe(false);
+        expect(result.items).toHaveLength(0);
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query]) => query?.ParentId === 'music-library-1')).toBe(true);
+    });
+
+    it('deduplicates repeated pages and stops rather than spending the remaining Mix request budget', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockResolvedValue({
+            Items: [{ Id: 'same-track', Type: 'Audio' }],
+            TotalRecordCount: 2100
+        });
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'repeated-page' });
+
+        expect(result.complete).toBe(false);
+        expect(result.items.map(item => item.Id)).toEqual(['same-track']);
+        expect(result.requests).toBeLessThan(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
+    });
+
+    it('marks a partly overlapping full page incomplete while retaining its new scoped tracks', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            const start = Number(query?.StartIndex || 0);
+            const items = Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                Id: `track-${start + index}`,
+                Type: 'Audio'
+            }));
+            if (vi.mocked(getPtvItems).mock.calls.length === 2 || vi.mocked(getPtvItems).mock.calls.length === 3) {
+                items[0] = { Id: 'track-from-first-page', Type: 'Audio' };
+            }
+
+            return { Items: items, TotalRecordCount: 2100 };
+        });
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'one-overlap' });
+
+        expect(result.complete).toBe(false);
+        expect(result.items.map(item => item.Id).filter(id => id === 'track-from-first-page')).toHaveLength(1);
+        expect(result.items.length).toBeGreaterThan(PTV_MUSIC_MIX_SAMPLE_PAGE_SIZE);
+        expect(result.requests).toBe(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS);
+    });
+
+    it('rejects a Mix superseded while a later scoped page is in flight', async () => {
+        mockSelectedMusicLibrary();
+        let current = true;
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (vi.mocked(getPtvItems).mock.calls.length > 1) current = false;
+
+            return {
+                Items: [{ Id: `track-${query?.StartIndex}`, Type: 'Audio' }],
+                TotalRecordCount: 2100
+            };
+        });
+
+        await expect(samplePtvMusicMixCandidates({ sessionSeed: 'superseded', isCurrent: () => current }))
+            .rejects.toMatchObject({ name: 'AbortError' });
+        expect(getPtvItems).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects identity switches during Mix sampling without starting another page', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (vi.mocked(getPtvItems).mock.calls.length > 1) vi.mocked(getPtvServerId).mockReturnValue('server-2');
+
+            return {
+                Items: [{ Id: `track-${query?.StartIndex}`, Type: 'Audio' }],
+                TotalRecordCount: 2100
+            };
+        });
+
+        await expect(samplePtvMusicMixCandidates({ sessionSeed: 'identity-switch' }))
+            .rejects.toMatchObject({ name: 'AbortError' });
+        expect(getPtvItems).toHaveBeenCalledTimes(2);
+    });
+
+    it('stops a Mix after one count probe if Jellyfin omits the total', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [{ Id: 'track-1', Type: 'Audio' }] });
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'missing-total' });
+
+        expect(result).toMatchObject({ complete: false, items: [], requests: 1, totalCount: null });
+        expect(getPtvItems).toHaveBeenCalledTimes(1);
+    });
+
+    it('stops at an empty sampled page instead of restarting at the first page', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async () => ({
+            Items: vi.mocked(getPtvItems).mock.calls.length === 1 ? [{ Id: 'track-0', Type: 'Audio' }] : [],
+            TotalRecordCount: 2100
+        }));
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'empty-page' });
+
+        expect(result).toMatchObject({ complete: false, items: [], requests: 2 });
+        expect(getPtvItems).toHaveBeenCalledTimes(2);
+    });
+
+    it('retains a valid first scoped page when a later optional sampling request fails', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (vi.mocked(getPtvItems).mock.calls.length === 3) {
+                throw new Error('Optional page failed');
+            }
+
+            return {
+                Items: [{ Id: `track-${query?.StartIndex}`, Type: 'Audio' }],
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'partial-failure' });
+
+        expect(result.complete).toBe(false);
+        expect(result.items).toHaveLength(1);
+        expect(result.requests).toBe(3);
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query]) => query?.ParentId === 'music-library-1')).toBe(true);
+    });
+
+    it.each(['sampled page', 'recent page'])('proves an explicit song seed after a failed %s without claiming the sample is complete', async failedPage => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.SearchTerm === 'Seed Song') {
+                return {
+                    Items: [{ Id: 'verified-seed', Name: 'Seed Song', Type: 'Audio' }],
+                    TotalRecordCount: 1
+                };
+            }
+            if (failedPage === 'sampled page' && vi.mocked(getPtvItems).mock.calls.length === 3) {
+                throw new Error('Later sampled page failed');
+            }
+            if (failedPage === 'recent page' && query?.SortBy === 'DatePlayed,SortName') {
+                throw new Error('Recent page failed');
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'verified-seed', item: { Id: 'verified-seed', Name: 'Seed Song', Type: 'Audio' }, kind: 'song' },
+            sessionSeed: `seed-after-${failedPage}`
+        });
+
+        expect(result.complete).toBe(false);
+        expect(result.seedVerified).toBe(true);
+        expect(result.items.map(item => item.Id)).toContain('verified-seed');
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query], index) => (
+            query?.ParentId === 'music-library-1'
+            && vi.mocked(getPtvItems).mock.calls[index]?.[1]?.userId === 'user-1'
+        ))).toBe(true);
+    });
+
+    it('rejects a Mix aborted during a sampled page even when the transport resolves', async () => {
+        mockSelectedMusicLibrary();
+        // eslint-disable-next-line compat/compat -- Jellyfin loads the AbortController polyfill for legacy web runtimes.
+        const controller = new AbortController();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (vi.mocked(getPtvItems).mock.calls.length === 2) controller.abort();
+
+            return {
+                Items: [{ Id: `track-${query?.StartIndex}`, Type: 'Audio' }],
+                TotalRecordCount: 2100
+            };
+        });
+
+        await expect(samplePtvMusicMixCandidates({ sessionSeed: 'aborted', signal: controller.signal }))
+            .rejects.toMatchObject({ name: 'AbortError' });
+        expect(getPtvItems).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects a Mix after Music scope invalidation rather than publishing stale pages', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (vi.mocked(getPtvItems).mock.calls.length === 2) invalidatePtvMusicHomeCache();
+
+            return {
+                Items: [{ Id: `track-${query?.StartIndex}`, Type: 'Audio' }],
+                TotalRecordCount: 2100
+            };
+        });
+
+        await expect(samplePtvMusicMixCandidates({ sessionSeed: 'scope-retired' }))
+            .rejects.toMatchObject({ name: 'AbortError' });
+        expect(getPtvItems).toHaveBeenCalledTimes(2);
+    });
+
+    it('allows a completed Mix to assert its original scope after ranking and rejects later invalidation', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'post-ranking-guard' });
+
+        expect(() => result.assertCurrent()).not.toThrow();
+        invalidatePtvMusicHomeCache();
+        expect(() => result.assertCurrent()).toThrow(expect.objectContaining({ name: 'AbortError' }));
+    });
+
+    it('rejects a completed Mix when the selected Music view changes before publication', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'view-switch-guard' });
+
+        vi.mocked(getPtvUserViews).mockResolvedValue({
+            Items: [{ CollectionType: 'music', Id: 'music-library-2', Name: 'Other Music', Type: 'CollectionFolder' }],
+            TotalRecordCount: 1
+        });
+        await getPtvMusicLibrary();
+
+        expect(() => result.assertCurrent()).toThrow(expect.objectContaining({ name: 'AbortError' }));
+    });
+
+    it('verifies the same selected Music view through one fresh user-aware publication read', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'fresh-publication-read' });
+
+        await expect(result.verifyCurrent()).resolves.toBeUndefined();
+        expect(getPtvUserViews).toHaveBeenCalledTimes(2);
+        expect(vi.mocked(getPtvUserViews).mock.calls.every(([options]) => (
+            options?.serverId === 'server-1' && options?.userId === 'user-1'
+        ))).toBe(true);
+        expect(vi.mocked(getPtvUserViews).mock.calls[1]?.[0]).toEqual(expect.objectContaining({ fresh: true }));
+    });
+
+    it('rejects a selected-view change during ranking even without cache invalidation', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'silent-view-switch' });
+        vi.mocked(getPtvUserViews).mockResolvedValue({
+            Items: [{ CollectionType: 'music', Id: 'music-library-2', Name: 'Other Music', Type: 'CollectionFolder' }],
+            TotalRecordCount: 1
+        });
+
+        expect(() => result.assertCurrent()).not.toThrow();
+        await expect(result.verifyCurrent()).rejects.toMatchObject({ name: 'AbortError' });
+        expect(getPtvUserViews).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects publication when the fresh Music view verification fails', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockResolvedValue({ Items: [], TotalRecordCount: 0 });
+        const result = await samplePtvMusicMixCandidates({ sessionSeed: 'view-lookup-failure' });
+        vi.mocked(getPtvUserViews).mockRejectedValue(new Error('Views unavailable'));
+
+        await expect(result.verifyCurrent()).rejects.toMatchObject({ name: 'AbortError' });
+        expect(getPtvUserViews).toHaveBeenCalledTimes(2);
+    });
+
+    it('adds an exact song seed only after a user-aware selected-library search returns its ID', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.SearchTerm) {
+                return {
+                    Items: [
+                        { Id: 'foreign-song', Name: 'The Seed', Type: 'Audio' },
+                        { Id: 'seed-song', Name: 'The Seed', Type: 'Audio' }
+                    ],
+                    TotalRecordCount: 2
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'seed-song', item: { Id: 'seed-song', Name: 'The Seed', Type: 'Audio' }, kind: 'song' },
+            sessionSeed: 'song-seed'
+        });
+
+        expect(result.seedVerified).toBe(true);
+        expect(result.items.map(item => item.Id)).toContain('seed-song');
+        expect(result.items.map(item => item.Id)).not.toContain('foreign-song');
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query], index) => (
+            query?.ParentId === 'music-library-1'
+            && vi.mocked(getPtvItems).mock.calls[index]?.[1]?.userId === 'user-1'
+        ))).toBe(true);
+    });
+
+    it('does not verify a seed from an inconsistent zero-total nonempty search response', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.SearchTerm === 'Seed Song') {
+                return {
+                    Items: [{ Id: 'unproven-seed', Name: 'Seed Song', Type: 'Audio' }],
+                    TotalRecordCount: 0
+                };
+            }
+
+            return {
+                Items: [{ Id: 'ordinary-track', Type: 'Audio' }],
+                TotalRecordCount: 1
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'unproven-seed', item: { Id: 'unproven-seed', Name: 'Seed Song', Type: 'Audio' }, kind: 'song' },
+            sessionSeed: 'inconsistent-seed-total'
+        });
+
+        expect(result.seedVerified).toBe(false);
+        expect(result.complete).toBe(false);
+        expect(result.items.map(item => item.Id)).not.toContain('unproven-seed');
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query]) => query?.ParentId === 'music-library-1')).toBe(true);
+    });
+
+    it('does not trust a foreign album seed or query its descendants without exact selected-view membership', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.IncludeItemTypes === 'MusicAlbum') {
+                return {
+                    Items: [{ Id: 'other-album', Name: 'Similar Album', Type: 'MusicAlbum' }],
+                    TotalRecordCount: 1
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    AlbumId: 'other-album',
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'foreign-album', item: { Id: 'foreign-album', Name: 'Similar Album', Type: 'MusicAlbum' }, kind: 'album' },
+            sessionSeed: 'foreign-album'
+        });
+
+        expect(result.seedVerified).toBe(false);
+        expect(result.items.map(item => item.Id)).not.toContain('foreign-album');
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query]) => query?.ParentId === 'music-library-1')).toBe(true);
+    });
+
+    it('retrieves bounded nested tracks only after proving exact album membership in the selected view', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.IncludeItemTypes === 'MusicAlbum') {
+                return {
+                    Items: [{ Id: 'album-1', Name: 'A Two-Disc Album', Type: 'MusicAlbum' }],
+                    TotalRecordCount: 1
+                };
+            }
+            if (query?.ParentId === 'album-1') {
+                return {
+                    Items: [
+                        musicTrack('disc-1-song', 1, 1),
+                        musicTrack('disc-2-song', 2, 1),
+                        musicTrack('wrong-album-song', 1, 2, 'other-album')
+                    ],
+                    TotalRecordCount: 3
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'album-1', item: selectedMusicAlbum, kind: 'album' },
+            sessionSeed: 'nested-album'
+        });
+
+        expect(result.seedVerified).toBe(true);
+        expect(result.items.map(item => item.Id)).toEqual(expect.arrayContaining(['disc-1-song', 'disc-2-song']));
+        expect(result.items.map(item => item.Id)).not.toContain('wrong-album-song');
+        expect(result.requests).toBe(PTV_MUSIC_MIX_SAMPLE_BASE_REQUESTS + 3);
+        expect(vi.mocked(getPtvItems).mock.calls.slice(-2).map(([query]) => query?.ParentId))
+            .toEqual(['music-library-1', 'album-1']);
+        expect(vi.mocked(getPtvItems).mock.calls.slice(-2).every(([, options]) => options?.userId === 'user-1')).toBe(true);
+    });
+
+    it('keeps artist affinity scoped and accepts only tracks tied to the verified artist ID', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(requestPtvJson).mockResolvedValue({
+            Items: [{ Id: 'artist-1', Name: 'Artist One', Type: 'MusicArtist' }],
+            TotalRecordCount: 1
+        });
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.ArtistIds === 'artist-1') {
+                return {
+                    Items: [
+                        { ArtistItems: [{ Id: 'artist-1', Name: 'Artist One' }], Id: 'artist-track', Type: 'Audio' },
+                        { ArtistItems: [{ Id: 'other-artist', Name: 'Other' }], Id: 'foreign-track', Type: 'Audio' }
+                    ],
+                    TotalRecordCount: 2
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'artist-1', item: { Id: 'artist-1', Name: 'Artist One', Type: 'MusicArtist' }, kind: 'artist' },
+            sessionSeed: 'artist-seed'
+        });
+
+        expect(result.seedVerified).toBe(true);
+        expect(result.items.map(item => item.Id)).toContain('artist-track');
+        expect(result.items.map(item => item.Id)).not.toContain('foreign-track');
+        expect(vi.mocked(getPtvItems).mock.calls.every(([query]) => query?.ParentId === 'music-library-1')).toBe(true);
+        expect(requestPtvJson).toHaveBeenCalledWith('Artists', expect.objectContaining({
+            params: expect.objectContaining({ ParentId: 'music-library-1', UserId: 'user-1' }),
+            serverId: 'server-1'
+        }));
+    });
+
+    it.each(['empty', 'error'])('verifies an album artist through the scoped fallback when the ordinary artist endpoint has an %s result', async outcome => {
+        mockSelectedMusicLibrary();
+        vi.mocked(requestPtvJson).mockImplementation(async path => {
+            if (path === 'Artists' && outcome === 'error') throw new Error('Ordinary artist endpoint unavailable');
+
+            return path === 'Artists' ? {
+                Items: [],
+                TotalRecordCount: 0
+            } : {
+                Items: [{ Id: 'album-artist-1', Name: 'Album Artist', Type: 'MusicArtist' }],
+                TotalRecordCount: 1
+            };
+        });
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.ArtistIds === 'album-artist-1') {
+                return {
+                    Items: [{ ArtistItems: [], Id: 'album-artist-track', Type: 'Audio' }],
+                    TotalRecordCount: 1
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'album-artist-1', item: { Id: 'album-artist-1', Name: 'Album Artist', Type: 'MusicArtist' }, kind: 'artist' },
+            sessionSeed: 'album-artist-fallback'
+        });
+
+        expect(result.seedVerified).toBe(true);
+        expect(result.items.map(item => item.Id)).toContain('album-artist-track');
+        expect(vi.mocked(requestPtvJson).mock.calls.map(([path]) => path)).toEqual(['Artists', 'Artists/AlbumArtists']);
+        expect(vi.mocked(requestPtvJson).mock.calls.every(([, options]) => (
+            options?.params?.ParentId === 'music-library-1'
+            && options?.params?.UserId === 'user-1'
+            && options?.serverId === 'server-1'
+        ))).toBe(true);
+    });
+
+    it.each([
+        { kind: 'song' as const, type: 'Audio', expectedId: 'exact-seed' },
+        { kind: 'album' as const, type: 'MusicAlbum', expectedId: 'related-track' },
+        { kind: 'artist' as const, type: 'MusicArtist', expectedId: 'related-track' }
+    ])('finds an exact $kind seed after more than 48 same-name hits without widening scope', async ({ kind, type, expectedId }) => {
+        mockSelectedMusicLibrary();
+        const matches: PtvMusicItem[] = Array.from({ length: 90 }, (_, index) => ({
+            Id: index === 70 ? 'exact-seed' : `same-name-${index}`,
+            Name: 'Common Name',
+            Type: type
+        }));
+        if (kind === 'artist') {
+            vi.mocked(requestPtvJson).mockImplementation(async (_path, options) => {
+                const start = Number(options?.params?.StartIndex || 0);
+                return {
+                    Items: matches.slice(start, start + Number(options?.params?.Limit || 0)),
+                    TotalRecordCount: matches.length
+                };
+            });
+        }
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.SearchTerm === 'Common Name') {
+                const start = Number(query.StartIndex || 0);
+                return {
+                    Items: matches.slice(start, start + Number(query.Limit || 0)),
+                    TotalRecordCount: matches.length
+                };
+            }
+            if (query?.ParentId === 'exact-seed' || query?.ArtistIds === 'exact-seed') {
+                return {
+                    Items: [{ AlbumId: 'exact-seed', ArtistItems: [], Id: 'related-track', Type: 'Audio' }],
+                    TotalRecordCount: 1
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'exact-seed', item: { Id: 'exact-seed', Name: 'Common Name', Type: type }, kind },
+            sessionSeed: `many-${kind}`
+        });
+        const membershipQueries = kind === 'artist' ?
+            vi.mocked(requestPtvJson).mock.calls.map(([, options]) => options?.params) :
+            vi.mocked(getPtvItems).mock.calls.map(([query]) => query)
+                .filter(query => query?.SearchTerm === 'Common Name');
+
+        expect(result.seedVerified).toBe(true);
+        expect(result.items.map(item => item.Id)).toContain(expectedId);
+        expect(membershipQueries.map(query => query?.StartIndex)).toEqual([0, 48]);
+        expect(membershipQueries.every(query => query?.ParentId === 'music-library-1')).toBe(true);
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
+        expect(vi.mocked(getPtvItems).mock.calls.every(([, options]) => options?.userId === 'user-1')).toBe(true);
+    });
+
+    it('stops exact seed membership at three scoped pages when a common-name ID is beyond the lookup budget', async () => {
+        mockSelectedMusicLibrary();
+        vi.mocked(getPtvItems).mockImplementation(async query => {
+            if (query?.SearchTerm === 'Common Name') {
+                const start = Number(query.StartIndex || 0);
+                return {
+                    Items: Array.from({ length: Number(query.Limit || 0) }, (_, index) => ({
+                        Id: start + index === 150 ? 'too-deep-seed' : `same-name-${start + index}`,
+                        Name: 'Common Name',
+                        Type: 'Audio'
+                    })),
+                    TotalRecordCount: 160
+                };
+            }
+
+            const start = Number(query?.StartIndex || 0);
+            return {
+                Items: Array.from({ length: Number(query?.Limit || 0) }, (_, index) => ({
+                    Id: `ordinary-${start + index}`,
+                    Type: 'Audio'
+                })),
+                TotalRecordCount: 2100
+            };
+        });
+
+        const result = await samplePtvMusicMixCandidates({
+            seed: { id: 'too-deep-seed', item: { Id: 'too-deep-seed', Name: 'Common Name', Type: 'Audio' }, kind: 'song' },
+            sessionSeed: 'bounded-name-search'
+        });
+        const membershipQueries = vi.mocked(getPtvItems).mock.calls
+            .map(([query]) => query)
+            .filter(query => query?.SearchTerm === 'Common Name');
+
+        expect(result.seedVerified).toBe(false);
+        expect(result.items.map(item => item.Id)).not.toContain('too-deep-seed');
+        expect(membershipQueries.map(query => query?.StartIndex)).toEqual([0, 48, 96]);
+        expect(result.requests).toBeLessThanOrEqual(PTV_MUSIC_MIX_SAMPLE_MAX_REQUESTS);
     });
 
     it('uses the lean card profile and bounds playlist content probes', async () => {

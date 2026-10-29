@@ -355,6 +355,7 @@
         "music discovery and relationship reconciliation",
         "user-visible Music album membership proof and bounded nested-disc track projection",
         "Music Identify adoption",
+        "bounded user-view-scoped Music Mix candidate sampling, ranking and generation retirement",
         "native audio queue and playback view state"
       ],
       "systemRefs": [
@@ -1979,6 +1980,7 @@
         "PTV header and sidebar navigation",
         "PTV browser-local notification inbox",
         "home",
+        "music",
         "search",
         "PTV Plugin endpoints and caches"
       ],
@@ -2014,6 +2016,7 @@
         "routingAndViewLifecycle",
         "search",
         "home",
+        "music",
         "reading",
         "cardsAndDetails"
       ],
@@ -3876,7 +3879,7 @@
         "STOCK_REPLACED",
         "NEW_PTV_SYSTEM"
       ],
-      "ptvChange": "PTV owns native Music discovery, relationship reconciliation, queue and native audio playback surfaces while using Jellyfin item/stream/report APIs. The Issue #38 local candidate resolves nested-disc album tracks with a separately proven user-visible Music album identity and exact Audio AlbumId filtering.",
+      "ptvChange": "PTV owns native Music discovery, relationship reconciliation, bounded user-view-scoped Mix candidate selection, queue and native audio playback surfaces while using Jellyfin item/stream/report APIs. The Issue #38 local candidate resolves nested-disc album tracks with a separately proven user-visible Music album identity and exact Audio AlbumId filtering.",
       "risk": "CRITICAL",
       "conflictClass": "RACE_RISK",
       "albumTrackLocalCandidate": {
@@ -3885,6 +3888,13 @@
         "trackProjection": "Page recursive ParentId album descendants and the AlbumIds relationship query; admit only Audio whose exact AlbumId equals the requested album ID; deduplicate by item ID and order by disc, track, sort name, and ID.",
         "lifecycle": "Bound page count and reject incomplete pages; abort results on route cancellation or server/user display-identity change. Do not use the shared unscoped-empty fallback.",
         "acceptance": "Local source/test candidate only. Authenticated hosted candidate and physical Music playback/queue acceptance remain pending separate installation authorization."
+      },
+      "musicMixLocalCandidate": {
+        "authority": "Jellyfin user-aware Audio Items under the selected user-visible Music view; cached Home shelves and caller-supplied seed DTOs do not establish membership",
+        "sampling": "Capture server, user, and selected Music view once per generation. Use a fixed-budget fresh count probe and seeded strata of recursive ParentId-scoped Audio pages, with bounded scoped affinity/seed queries. Deduplicate IDs and rank relevant/discovery candidates before the Plugin's 300-candidate boundary; both Plugin and local fallback receive the same scoped set.",
+        "seedMembership": "Verify requested song, album, or artist identity by an exact-ID match in bounded user-aware, selected-view-scoped search before admitting seed-related tracks; do not combine Ids with ParentId as proof or trust Home-only items.",
+        "lifecycle": "An action-owned generation/abort guard and captured server/user/view scope retire late pages, Plugin ranking, and Smart Playlist results on a newer action, identity change, or unmount. A separate owned no-store selected-view read checks scope again before publication. An inconsistent page may leave only already validated scoped candidates; it cannot authorize unscoped fallback.",
+        "acceptance": "Local source and fixture candidate only. Hosted library-scope, playback-queue, and physical Music acceptance are separate pending checks."
       },
       "chapterRefs": [
         "10-music.md",
@@ -3915,6 +3925,27 @@
           "version": "unreleased source",
           "file": "src/ptv/modules/music/musicApi.ts",
           "symbol": "fetchPtvMusicAlbumTracks Music-scoped membership and nested-disc projection",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local Music Mix candidate",
+          "version": "unreleased source",
+          "file": "src/ptv/modules/music/musicApi.ts",
+          "symbol": "samplePtvMusicMixCandidates bounded selected-view Audio sampling and seed membership",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local Music Mix candidate",
+          "version": "unreleased source",
+          "file": "src/ptv/modules/music/musicRecommendations.ts",
+          "symbol": "buildPtvMusicRecommendations scoped candidate ranking and Plugin/local handoff",
+          "status": "VERIFIED_FROM_SOURCE"
+        },
+        {
+          "repository": "PTV Web local Music Mix candidate",
+          "version": "unreleased source",
+          "file": "src/ptv/modules/music/musicPage.tsx",
+          "symbol": "SmartPlaylistPanel generation retirement",
           "status": "VERIFIED_FROM_SOURCE"
         }
       ]

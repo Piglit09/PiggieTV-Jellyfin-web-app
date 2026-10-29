@@ -65,6 +65,7 @@ function getWindowApiClient(): PtvApiClientLike | null {
 }
 
 let incompleteRequestIdentitySequence = 0;
+let freshRequestSequence = 0;
 
 function getNextIncompleteRequestIdentity() {
     incompleteRequestIdentitySequence += 1;
@@ -309,7 +310,8 @@ function getPtvJsonWithSignal<T>(
     apiClient: PtvApiClientLike,
     url: string,
     includeAuthorization: boolean,
-    signal: AbortSignal
+    signal: AbortSignal,
+    fresh: boolean
 ): Promise<T> {
     if (
         typeof globalThis.fetch !== 'function'
@@ -370,6 +372,7 @@ function getPtvJsonWithSignal<T>(
     };
 
     return globalThis.fetch(url, {
+        ...(fresh ? { cache: 'no-store' as const } : {}),
         credentials: 'same-origin',
         headers,
         method: 'GET',
@@ -405,6 +408,7 @@ function getPtvJsonWithSignal<T>(
 export function requestPtvJson<T = unknown>(
     pathOrUrl: string,
     options: {
+        fresh?: boolean;
         includeAuthorization?: boolean;
         params?: PtvApiQuery | null;
         scope?: 'background' | 'route';
@@ -445,8 +449,11 @@ export function requestPtvJson<T = unknown>(
         includeAuthorization,
         authorizationIdentity
     );
-    return coordinatePtvJsonRequest<T>(requestKey, signal => (
-        getPtvJsonWithSignal<T>(apiClient, url, includeAuthorization, signal)
+    // An explicit freshness check owns a separate transport rather than joining an older in-flight response.
+    const coordinatedRequestKey = options.fresh ? `${requestKey} fresh:${++freshRequestSequence}` : requestKey;
+
+    return coordinatePtvJsonRequest<T>(coordinatedRequestKey, signal => (
+        getPtvJsonWithSignal<T>(apiClient, url, includeAuthorization, signal, options.fresh === true)
     ), {
         endpoint: pathOrUrl,
         includeAuthorization,
